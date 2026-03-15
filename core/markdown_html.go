@@ -13,7 +13,7 @@ const maxPreTableWidth = 42
 // minColWidthForPre is the minimum display width per column in a <pre> table.
 // If shrinking columns to fit maxPreTableWidth would make any column narrower
 // than this, the table is "flattened" into a bulleted record list instead.
-const minColWidthForPre = 5
+const minColWidthForPre = 7
 
 // MarkdownToSimpleHTML converts common Markdown to a simplified HTML subset.
 // Supported tags: <b>, <i>, <s>, <code>, <pre>, <a href="">, <blockquote>.
