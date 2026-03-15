@@ -62,6 +62,7 @@ func main() {
 	}
 
 	// When started as a daemon (CC_LOG_FILE set), redirect logs to a rotating file.
+	// Otherwise (foreground), use a colored handler if stderr is a terminal.
 	var logWriter io.Writer
 	var logCloser io.Closer
 	if logFile := os.Getenv("CC_LOG_FILE"); logFile != "" {
@@ -79,6 +80,8 @@ func main() {
 		logWriter = w
 		logCloser = w
 		slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	} else if isTerminal(os.Stderr) {
+		slog.SetDefault(slog.New(newColorHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	}
 
 	configFlag := flag.String("config", "", "path to config file (default: ./config.toml or ~/.cc-connect/config.toml)")
