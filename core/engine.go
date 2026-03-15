@@ -169,6 +169,9 @@ type Engine struct {
 	relayManager     *RelayManager
 	eventIdleTimeout time.Duration
 
+	// Config-driven workspace bindings (projects.workspaces)
+	configWorkspaces []ConfigWorkspace // sorted longest-match-first
+
 	// Multi-workspace mode
 	multiWorkspace    bool
 	baseDir           string
@@ -335,6 +338,78 @@ func NewEngine(name string, ag Agent, platforms []Platform, sessionStorePath str
 	}
 
 	return e
+}
+
+// ConfigWorkspace is a static channel→workspace mapping from config.
+type ConfigWorkspace struct {
+	ChannelKey string // e.g. "-1002691438349:topic:932" or "-1002691438349"
+	WorkDir    string
+	Name       string
+}
+
+// SetConfigWorkspaces loads static workspace bindings from project config.
+// Each entry maps a channel key (extracted from session keys) to a work directory.
+// Channel keys support topic format: "-100123:topic:42" matches topic 42 in chat -100123.
+func (e *Engine) SetConfigWorkspaces(entries []ConfigWorkspace) {
+	if len(entries) == 0 {
+		return
+	}
+	// Sort longest-first so topic-specific keys match before chat-wide keys.
+	sorted := make([]ConfigWorkspace, len(entries))
+	copy(sorted, entries)
+	sort.Slice(sorted, func(i, j int) bool {
+		return len(sorted[i].ChannelKey) > len(sorted[j].ChannelKey)
+	})
+	e.configWorkspaces = sorted
+	if e.workspacePool == nil {
+		e.workspacePool = newWorkspacePool(15 * time.Minute)
+		go e.runIdleReaper()
+	}
+	slog.Info("config workspaces loaded", "count", len(entries))
+}
+
+// resolveConfigWorkspace checks if the session key matches any config-driven
+// workspace binding. Returns the work_dir or "" if no match.
+// Extracts a channel key from the sessionKey (chatID, or chatID:topic:topicID)
+// and compares against configured entries.
+func (e *Engine) resolveConfigWorkspace(sessionKey string) string {
+	if len(e.configWorkspaces) == 0 {
+		return ""
+	}
+	key := extractChannelKey(sessionKey)
+	if key == "" {
+		return ""
+	}
+	for _, cw := range e.configWorkspaces {
+		if cw.ChannelKey == key {
+			return cw.WorkDir
+		}
+	}
+	// Fallback: match by chat-only prefix (strip topic part from key)
+	chatOnly := extractChannelID(sessionKey)
+	if chatOnly != key {
+		for _, cw := range e.configWorkspaces {
+			if cw.ChannelKey == chatOnly {
+				return cw.WorkDir
+			}
+		}
+	}
+	return ""
+}
+
+// extractChannelKey extracts a topic-aware channel key from a session key.
+// For "telegram:-100123:topic:42:456" → "-100123:topic:42"
+// For "telegram:-100123:456" → "-100123"
+// For "slack:C123:U1" → "C123"
+func extractChannelKey(sessionKey string) string {
+	parts := strings.SplitN(sessionKey, ":", 5)
+	if len(parts) < 2 {
+		return ""
+	}
+	if len(parts) >= 4 && parts[2] == "topic" {
+		return parts[1] + ":topic:" + parts[3]
+	}
+	return parts[1]
 }
 
 // SetMultiWorkspace enables multi-workspace mode for the engine.
@@ -950,22 +1025,36 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		}
 	}
 
-	// Topic-based workdir resolution (platform-driven, e.g. Telegram forum topics)
+	// Config-driven workspace resolution (highest priority)
 	var wsAgent Agent
 	var wsSessions *SessionManager
 	var resolvedWorkspace string
-	if twr, ok := p.(TopicWorkDirResolver); ok {
-		if topicDir := twr.ResolveTopicWorkDir(msg.SessionKey); topicDir != "" {
-			resolvedWorkspace = topicDir
-			if e.workspacePool == nil {
-				e.workspacePool = newWorkspacePool(15 * time.Minute)
-			}
-			var err error
-			wsAgent, wsSessions, err = e.getOrCreateWorkspaceAgent(topicDir)
-			if err != nil {
-				slog.Error("failed to create topic workspace agent", "workspace", topicDir, "err", err)
-				e.reply(p, msg.ReplyCtx, fmt.Sprintf("Failed to initialize workspace: %v", err))
-				return
+	if cfgDir := e.resolveConfigWorkspace(msg.SessionKey); cfgDir != "" {
+		resolvedWorkspace = cfgDir
+		var err error
+		wsAgent, wsSessions, err = e.getOrCreateWorkspaceAgent(cfgDir)
+		if err != nil {
+			slog.Error("failed to create config workspace agent", "workspace", cfgDir, "err", err)
+			e.reply(p, msg.ReplyCtx, fmt.Sprintf("Failed to initialize workspace: %v", err))
+			return
+		}
+	}
+
+	// Topic-based workdir resolution (platform-driven, e.g. Telegram forum topics)
+	if resolvedWorkspace == "" {
+		if twr, ok := p.(TopicWorkDirResolver); ok {
+			if topicDir := twr.ResolveTopicWorkDir(msg.SessionKey); topicDir != "" {
+				resolvedWorkspace = topicDir
+				if e.workspacePool == nil {
+					e.workspacePool = newWorkspacePool(15 * time.Minute)
+				}
+				var err error
+				wsAgent, wsSessions, err = e.getOrCreateWorkspaceAgent(topicDir)
+				if err != nil {
+					slog.Error("failed to create topic workspace agent", "workspace", topicDir, "err", err)
+					e.reply(p, msg.ReplyCtx, fmt.Sprintf("Failed to initialize workspace: %v", err))
+					return
+				}
 			}
 		}
 	}
@@ -8473,7 +8562,16 @@ func (e *Engine) requirePrivateForMutation(p Platform, msg *Message, cmdName str
 // commandContext resolves the appropriate agent, session manager, and interactive key
 // for a command. In multi-workspace mode, it routes to the bound workspace if present.
 func (e *Engine) commandContext(p Platform, msg *Message) (Agent, *SessionManager, string, error) {
-	// Topic-based workdir takes priority (e.g. Telegram forum topics with topic_workdirs).
+	// Config-driven workspace bindings take highest priority.
+	if cfgDir := e.resolveConfigWorkspace(msg.SessionKey); cfgDir != "" {
+		wsAgent, wsSessions, err := e.getOrCreateWorkspaceAgent(cfgDir)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		return wsAgent, wsSessions, cfgDir + ":" + msg.SessionKey, nil
+	}
+
+	// Topic-based workdir (platform-driven, e.g. Telegram forum topics with topic_workdirs).
 	if twr, ok := p.(TopicWorkDirResolver); ok {
 		if topicDir := twr.ResolveTopicWorkDir(msg.SessionKey); topicDir != "" {
 			if e.workspacePool == nil {
@@ -8509,9 +8607,16 @@ func (e *Engine) commandContext(p Platform, msg *Message) (Agent, *SessionManage
 }
 
 // sessionContextForKey resolves the agent and session manager for a sessionKey.
-// It checks topic_workdir first, then workspace bindings, and falls back to global context.
+// Priority: config workspaces → topic_workdir → workspace bindings → global.
 func (e *Engine) sessionContextForKey(sessionKey string) (Agent, *SessionManager) {
-	// Topic-based workdir takes priority.
+	// Config-driven workspace bindings take highest priority.
+	if cfgDir := e.resolveConfigWorkspace(sessionKey); cfgDir != "" {
+		if wsAgent, wsSessions, err := e.getOrCreateWorkspaceAgent(cfgDir); err == nil {
+			return wsAgent, wsSessions
+		}
+	}
+
+	// Topic-based workdir (platform-driven).
 	for _, p := range e.platforms {
 		if twr, ok := p.(TopicWorkDirResolver); ok {
 			if topicDir := twr.ResolveTopicWorkDir(sessionKey); topicDir != "" {

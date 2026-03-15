@@ -185,6 +185,24 @@ func main() {
 
 		engine := core.NewEngine(proj.Name, agent, platforms, sessionFile, lang)
 
+		// Wire config-driven workspace bindings
+		if len(proj.Workspaces) > 0 {
+			var entries []core.ConfigWorkspace
+			for _, ws := range proj.Workspaces {
+				dir := ws.WorkDir
+				if strings.HasPrefix(dir, "~/") {
+					home, _ := os.UserHomeDir()
+					dir = filepath.Join(home, dir[2:])
+				}
+				entries = append(entries, core.ConfigWorkspace{
+					ChannelKey: ws.ChannelID,
+					WorkDir:    dir,
+					Name:       ws.Name,
+				})
+			}
+			engine.SetConfigWorkspaces(entries)
+		}
+
 		// Wire multi-workspace mode
 		if proj.Mode == "multi-workspace" {
 			baseDir := proj.BaseDir

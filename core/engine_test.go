@@ -3753,3 +3753,172 @@ func TestTopicWorkDir_TwoDifferentChatsIsolated(t *testing.T) {
 		t.Fatal("chat agents should not be the global agent")
 	}
 }
+
+// ── config workspace tests ─────────────────────────────────────
+
+func TestExtractChannelKey(t *testing.T) {
+	tests := []struct {
+		sessionKey string
+		want       string
+	}{
+		{"telegram:-100123:456", "-100123"},
+		{"telegram:-100123:topic:42:456", "-100123:topic:42"},
+		{"telegram:-100123:topic:42", "-100123:topic:42"},
+		{"telegram:-100123", "-100123"},
+		{"slack:C123:U1", "C123"},
+		{"feishu:abc:def", "abc"},
+		{"x", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.sessionKey, func(t *testing.T) {
+			got := extractChannelKey(tt.sessionKey)
+			if got != tt.want {
+				t.Fatalf("extractChannelKey(%q) = %q, want %q", tt.sessionKey, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigWorkspaces_IsolatesTwoChats(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	p := &stubPlatformEngine{n: "telegram"}
+	globalAgent := &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "global-1", Summary: "Global Session", MessageCount: 1, ModifiedAt: time.Now()},
+	}}
+	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
+
+	// Set config workspaces (two chats → different dirs)
+	e.SetConfigWorkspaces([]ConfigWorkspace{
+		{ChannelKey: "-200001", WorkDir: dir1, Name: "delumo"},
+		{ChannelKey: "-200002", WorkDir: dir2, Name: "raissa"},
+	})
+
+	// Pre-populate workspace agents
+	ws1 := e.workspacePool.GetOrCreate(dir1)
+	ws1.agent = &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "delumo-1", Summary: "Delumo Page", MessageCount: 2, ModifiedAt: time.Now()},
+	}}
+	ws1.sessions = NewSessionManager("")
+
+	ws2 := e.workspacePool.GetOrCreate(dir2)
+	ws2.agent = &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "raissa-1", Summary: "Raissa Project", MessageCount: 5, ModifiedAt: time.Now()},
+	}}
+	ws2.sessions = NewSessionManager("")
+
+	// /list in chat 1 → delumo only
+	p.sent = nil
+	e.cmdList(p, &Message{SessionKey: "telegram:-200001:456", ReplyCtx: "ctx"}, nil)
+	if len(p.sent) == 0 {
+		t.Fatal("delumo: no output")
+	}
+	if !strings.Contains(p.sent[0], "Delumo Page") {
+		t.Fatalf("delumo: expected own session, got: %q", p.sent[0])
+	}
+	if strings.Contains(p.sent[0], "Raissa Project") || strings.Contains(p.sent[0], "Global") {
+		t.Fatalf("delumo: session leak: %q", p.sent[0])
+	}
+
+	// /list in chat 2 → raissa only
+	p.sent = nil
+	e.cmdList(p, &Message{SessionKey: "telegram:-200002:456", ReplyCtx: "ctx"}, nil)
+	if !strings.Contains(p.sent[0], "Raissa Project") {
+		t.Fatalf("raissa: expected own session, got: %q", p.sent[0])
+	}
+	if strings.Contains(p.sent[0], "Delumo Page") {
+		t.Fatalf("raissa: session leak: %q", p.sent[0])
+	}
+
+	// Private chat → global agent (no config workspace match)
+	p.sent = nil
+	e.cmdList(p, &Message{SessionKey: "telegram:123:123", ReplyCtx: "ctx"}, nil)
+	if len(p.sent) == 0 {
+		t.Fatal("private: no output")
+	}
+	if !strings.Contains(p.sent[0], "Global Session") {
+		t.Fatalf("private: expected global session, got: %q", p.sent[0])
+	}
+}
+
+func TestConfigWorkspaces_TopicAndChat(t *testing.T) {
+	dirTopic := t.TempDir()
+	dirChat := t.TempDir()
+
+	p := &stubPlatformEngine{n: "telegram"}
+	globalAgent := &stubAgent{}
+	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
+
+	// Topic-specific binding and chat-wide binding for same chat
+	e.SetConfigWorkspaces([]ConfigWorkspace{
+		{ChannelKey: "-100123:topic:42", WorkDir: dirTopic, Name: "topic42"},
+		{ChannelKey: "-100123", WorkDir: dirChat, Name: "chat-wide"},
+	})
+
+	ws1 := e.workspacePool.GetOrCreate(dirTopic)
+	ws1.agent = &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "t1", Summary: "Topic Session", MessageCount: 1, ModifiedAt: time.Now()},
+	}}
+	ws1.sessions = NewSessionManager("")
+
+	ws2 := e.workspacePool.GetOrCreate(dirChat)
+	ws2.agent = &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "c1", Summary: "Chat Session", MessageCount: 1, ModifiedAt: time.Now()},
+	}}
+	ws2.sessions = NewSessionManager("")
+
+	// Topic 42 → gets topic-specific workspace
+	agent1, _, _, _ := e.commandContext(p, &Message{SessionKey: "telegram:-100123:topic:42:456"})
+	if agent1 == globalAgent {
+		t.Fatal("topic 42 got global agent")
+	}
+
+	// Same chat, no topic → gets chat-wide workspace
+	agent2, _, _, _ := e.commandContext(p, &Message{SessionKey: "telegram:-100123:456"})
+	if agent2 == globalAgent {
+		t.Fatal("chat-wide got global agent")
+	}
+
+	// Different workspaces
+	if agent1 == agent2 {
+		t.Fatal("topic and chat-wide should have different agents")
+	}
+}
+
+func TestConfigWorkspaces_TakesPriorityOverTopicWorkDirs(t *testing.T) {
+	dirConfig := t.TempDir()
+	dirTopic := t.TempDir()
+
+	// Platform with topic_workdirs
+	p := &stubTopicWorkDirPlatform{
+		stubPlatformEngine: stubPlatformEngine{n: "telegram"},
+		workdirs: map[string]string{
+			"telegram:-100123:topic:42": dirTopic,
+		},
+	}
+
+	globalAgent := &stubAgent{}
+	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
+
+	// Config workspace for the same topic → should win
+	e.SetConfigWorkspaces([]ConfigWorkspace{
+		{ChannelKey: "-100123:topic:42", WorkDir: dirConfig, Name: "from-config"},
+	})
+
+	ws := e.workspacePool.GetOrCreate(dirConfig)
+	ws.agent = &stubListAgent{}
+	ws.sessions = NewSessionManager("")
+
+	agent, _, _, _ := e.commandContext(p, &Message{SessionKey: "telegram:-100123:topic:42:456"})
+	if agent == globalAgent {
+		t.Fatal("expected config workspace agent, got global")
+	}
+
+	// Verify it's the config workspace, not the topic_workdir one
+	resolved := e.resolveConfigWorkspace("telegram:-100123:topic:42:456")
+	if resolved != dirConfig {
+		t.Fatalf("resolveConfigWorkspace = %q, want %q", resolved, dirConfig)
+	}
+}

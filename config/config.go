@@ -148,6 +148,17 @@ type HeartbeatConfig struct {
 	TimeoutMins  *int   `toml:"timeout_mins,omitempty"`  // max execution time; default 30
 }
 
+// WorkspaceConfig maps a channel/topic to a workspace directory.
+// channel_id uses the platform's channel key format:
+//   - Telegram group: "-1002691438349"
+//   - Telegram topic: "-1002691438349:topic:932"
+//   - Slack channel: "C0123456789"
+type WorkspaceConfig struct {
+	ChannelID string `toml:"channel_id"` // platform channel key (supports topic format)
+	WorkDir   string `toml:"work_dir"`   // absolute path to workspace directory
+	Name      string `toml:"name,omitempty"` // display name for this workspace
+}
+
 // ProjectConfig binds one agent (with a specific work_dir) to one or more platforms.
 type ProjectConfig struct {
 	Name             string           `toml:"name"`
@@ -155,6 +166,7 @@ type ProjectConfig struct {
 	BaseDir          string           `toml:"base_dir,omitempty"` // parent dir for workspaces
 	Agent            AgentConfig      `toml:"agent"`
 	Platforms        []PlatformConfig `toml:"platforms"`
+	Workspaces       []WorkspaceConfig `toml:"workspaces,omitempty"` // static channel→workspace bindings
 	Heartbeat        HeartbeatConfig  `toml:"heartbeat"`
 	Quiet            *bool            `toml:"quiet,omitempty"`              // project-level quiet mode; overrides global setting
 	InjectSender     *bool            `toml:"inject_sender,omitempty"`      // prepend sender identity (platform + user ID) to each message sent to the agent
