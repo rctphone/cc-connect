@@ -10,6 +10,11 @@ import (
 // to inline-formatted text. 42 fits iPhone 14+ and most Android devices.
 const maxPreTableWidth = 42
 
+// maxFlattenThreshold is the natural table width above which tables are
+// "flattened" — each data row becomes a bulleted record with header labels
+// instead of a truncated grid. This preserves full cell content.
+const maxFlattenThreshold = 60
+
 // MarkdownToSimpleHTML converts common Markdown to a simplified HTML subset.
 // Supported tags: <b>, <i>, <s>, <code>, <pre>, <a href="">, <blockquote>.
 // Useful for platforms that accept a limited set of HTML (e.g. Telegram).
@@ -88,48 +93,37 @@ func MarkdownToSimpleHTML(md string) string {
 			}
 		}
 
-		if !hasFormatting {
-			// Branch A: <pre> with aligned columns.
-			// Compute max display width per column.
-			colWidths := make([]int, nCols)
-			for _, row := range rows {
-				for c := 0; c < nCols && c < len(row); c++ {
-					w := stringDisplayWidth(row[c])
-					if w > colWidths[c] {
-						colWidths[c] = w
-					}
+		// Compute max display width per column.
+		colWidths := make([]int, nCols)
+		for _, row := range rows {
+			for c := 0; c < nCols && c < len(row); c++ {
+				w := stringDisplayWidth(row[c])
+				if w > colWidths[c] {
+					colWidths[c] = w
 				}
 			}
+		}
 
-			// Total width: sum(colWidths) + (nCols-1)*3 for " | " separators.
-			totalWidth := 0
-			for _, w := range colWidths {
-				totalWidth += w
-			}
-			totalWidth += (nCols - 1) * 3
+		// Total width: sum(colWidths) + (nCols-1)*3 for " | " separators.
+		totalWidth := 0
+		for _, w := range colWidths {
+			totalWidth += w
+		}
+		totalWidth += (nCols - 1) * 3
 
-			if totalWidth > maxPreTableWidth {
-				// Shrink columns to fit within budget.
-				shrinkColumns(colWidths, nCols, maxPreTableWidth)
-				// If any column is too narrow (<3 chars), fall back to inline.
-				tooNarrow := false
-				for _, w := range colWidths {
-					if w < 3 {
-						tooNarrow = true
-						break
-					}
-				}
-				if tooNarrow {
-					renderTableInline(&b, rows)
-				} else {
-					renderTablePre(&b, rows, colWidths)
-				}
-			} else {
-				renderTablePre(&b, rows, colWidths)
-			}
-		} else {
+		if totalWidth > maxFlattenThreshold && len(rows) > 1 {
+			// Very wide table → flatten each row into a bulleted list.
+			renderTableFlat(&b, rows, hasFormatting)
+		} else if hasFormatting {
 			// Branch C: inline formatting preserved.
 			renderTableInline(&b, rows)
+		} else if totalWidth > maxPreTableWidth {
+			// Moderately wide → <pre> with truncation.
+			shrinkColumns(colWidths, nCols, maxPreTableWidth)
+			renderTablePre(&b, rows, colWidths)
+		} else {
+			// Fits within budget → <pre> as-is.
+			renderTablePre(&b, rows, colWidths)
 		}
 		tblLines = tblLines[:0]
 		inTable = false
@@ -477,6 +471,56 @@ func renderTablePre(b *strings.Builder, rows [][]string, colWidths []int) {
 		}
 	}
 	b.WriteString("</pre>")
+}
+
+// renderTableFlat writes a very wide table as a bulleted list of records.
+// Each data row becomes a "• firstCol" entry with "  Header: value" lines.
+// This avoids heavy truncation and preserves full cell content.
+func renderTableFlat(b *strings.Builder, rows [][]string, hasFormatting bool) {
+	if len(rows) < 2 {
+		// Only header, no data rows — render inline.
+		renderTableInline(b, rows)
+		return
+	}
+	headers := rows[0]
+	for i, row := range rows[1:] {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		// Use first cell as the bullet label.
+		label := ""
+		if len(row) > 0 {
+			label = row[0]
+		}
+		if label == "" {
+			label = headers[0]
+		}
+		b.WriteString("• <b>")
+		if hasFormatting {
+			b.WriteString(convertInlineHTML(label))
+		} else {
+			b.WriteString(escapeHTML(label))
+		}
+		b.WriteString("</b>")
+		// Remaining cells as "  Header: value" lines.
+		for c := 1; c < len(headers) && c < len(row); c++ {
+			val := row[c]
+			if val == "" {
+				continue
+			}
+			b.WriteByte('\n')
+			b.WriteString("  ")
+			if hasFormatting {
+				b.WriteString(convertInlineHTML(headers[c]))
+				b.WriteString(": ")
+				b.WriteString(convertInlineHTML(val))
+			} else {
+				b.WriteString(escapeHTML(headers[c]))
+				b.WriteString(": ")
+				b.WriteString(escapeHTML(val))
+			}
+		}
+	}
 }
 
 // renderTableInline writes a table with inline HTML formatting (Branch C).

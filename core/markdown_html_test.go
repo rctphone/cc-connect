@@ -458,28 +458,54 @@ func TestMarkdownToSimpleHTML_TableWide(t *testing.T) {
 	}
 }
 
-func TestMarkdownToSimpleHTML_TableVeryWideFallback(t *testing.T) {
-	// Table with many columns where each would be <3 chars should fall back to inline.
-	md := "| A | B | C | D | E | F | G | H | I | J | K | L | M | N | O |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |"
+func TestMarkdownToSimpleHTML_TableFlatten(t *testing.T) {
+	// Very wide table (>60 natural width) should be flattened to bulleted list.
+	md := "| | РИИЛ | RED | МТС Супер | Дилер 2.0 |\n|---|---|---|---|---|\n| Цена (промо) | 390₽/мес (3 мес) | 500₽/мес (3 мес) | 650₽/мес (1 год) | 207–367₽/мес |\n| Интернет | Безлимит | Безлимит | Безлимит | Безлимит |"
 	out := MarkdownToSimpleHTML(md)
-	// With 15 columns, each column gets <3 chars budget → fallback.
+	// Should NOT use <pre> — too wide.
 	if strings.Contains(out, "<pre>") {
-		t.Errorf("table with too many narrow cols should fall back to inline, got %q", out)
+		t.Errorf("very wide table should be flattened, not <pre>, got %q", out)
 	}
-	if !strings.Contains(out, "<b>") {
-		t.Errorf("expected bold header in fallback, got %q", out)
+	// Should have bullet points.
+	if !strings.Contains(out, "•") {
+		t.Errorf("expected bullet points in flattened table, got %q", out)
+	}
+	// Each data row becomes a bold label.
+	if !strings.Contains(out, "<b>Цена (промо)</b>") {
+		t.Errorf("expected bold label for data row, got %q", out)
+	}
+	// Header values used as labels.
+	if !strings.Contains(out, "РИИЛ: 390") {
+		t.Errorf("expected 'Header: value' format, got %q", out)
+	}
+	// Full content preserved (not truncated).
+	if !strings.Contains(out, "207–367₽/мес") {
+		t.Errorf("expected full cell content (no truncation), got %q", out)
 	}
 }
 
-func TestMarkdownToSimpleHTML_TableWide5Cols(t *testing.T) {
-	// 5-column table that's wide but each col still gets >=3 chars → <pre> with truncation.
-	md := "| Label | РИИЛ | RED | МТС | Дилер |\n|---|---|---|---|---|\n| Цена | 390₽/мес | 500₽/мес | 650₽/мес | 207₽/мес |"
+func TestMarkdownToSimpleHTML_TableFlattenSkipsEmpty(t *testing.T) {
+	// Flattened table should skip empty cells. Use long cell values to exceed 60 chars.
+	md := "| Label | Column Alpha | Column Beta | Column Gamma | Column Delta | Column Epsilon |\n|---|---|---|---|---|---|\n| Data Row One | some value here |  | another value |  | final value here |"
+	out := MarkdownToSimpleHTML(md)
+	if !strings.Contains(out, "•") {
+		t.Errorf("expected flattened format, got %q", out)
+	}
+	// Empty cells (Column Beta, Column Delta) should be omitted.
+	if strings.Contains(out, "Column Beta:") {
+		t.Errorf("empty cells should be skipped, got %q", out)
+	}
+	if strings.Contains(out, "Column Delta:") {
+		t.Errorf("empty cells should be skipped, got %q", out)
+	}
+}
+
+func TestMarkdownToSimpleHTML_TableModerateWidth(t *testing.T) {
+	// Table between 42-60 chars should use <pre> with truncation, not flatten.
+	md := "| Name | Description | Status |\n|---|---|---|\n| Task A | Implementing feature | Active |\n| Task B | Bug fix for login | Done |"
 	out := MarkdownToSimpleHTML(md)
 	if !strings.Contains(out, "<pre>") {
-		t.Errorf("5-col table should use <pre> with truncation, got %q", out)
-	}
-	if !strings.Contains(out, "…") || !strings.Contains(out, "РИИЛ") {
-		// Either truncated or fits — both are fine.
+		t.Errorf("moderate-width table should use <pre>, got %q", out)
 	}
 }
 
