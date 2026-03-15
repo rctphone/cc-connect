@@ -1121,9 +1121,11 @@ func (p *Platform) RegisterCommands(commands []core.BotCommandInfo) error {
 		})
 	}
 
-	// Limit to 100 commands
-	if len(tgCommands) > 100 {
-		tgCommands = tgCommands[:100]
+	// Telegram allows at most 100 commands. Stay well below to avoid edge cases.
+	const maxTelegramCommands = 80
+	if len(tgCommands) > maxTelegramCommands {
+		slog.Info("telegram: trimming commands to limit", "total", len(tgCommands), "limit", maxTelegramCommands)
+		tgCommands = tgCommands[:maxTelegramCommands]
 	}
 
 	if len(tgCommands) == 0 {
@@ -1131,6 +1133,7 @@ func (p *Platform) RegisterCommands(commands []core.BotCommandInfo) error {
 		return nil
 	}
 
+	slog.Debug("telegram: registering commands", "count", len(tgCommands))
 	cfg := tgbotapi.NewSetMyCommands(tgCommands...)
 	_, err := p.bot.Request(cfg)
 	if err != nil {

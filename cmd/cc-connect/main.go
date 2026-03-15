@@ -827,11 +827,15 @@ func setupLogger(level string, w io.Writer) {
 		logLevel = slog.LevelInfo
 	}
 	if w == nil {
-		w = os.Stdout
+		w = os.Stderr
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
-		Level: logLevel,
-	})))
+	opts := &slog.HandlerOptions{Level: logLevel}
+	// Use colored output when writing to a terminal
+	if f, ok := w.(*os.File); ok && isTerminal(f) {
+		slog.SetDefault(slog.New(newColorHandler(f, opts)))
+	} else {
+		slog.SetDefault(slog.New(slog.NewTextHandler(w, opts)))
+	}
 }
 
 // reloadConfig re-reads config.toml and applies hot-reloadable settings

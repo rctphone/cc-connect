@@ -2,26 +2,34 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
 
 // ANSI color codes
 const (
-	colorReset  = "\033[0m"
-	colorRed    = "\033[31m"
-	colorYellow = "\033[33m"
-	colorGreen  = "\033[32m"
-	colorCyan   = "\033[36m"
-	colorGray   = "\033[90m"
+	colorReset   = "\033[0m"
+	colorRed     = "\033[31m"
+	colorYellow  = "\033[33m"
+	colorGreen   = "\033[32m"
+	colorCyan    = "\033[36m"
+	colorGray    = "\033[90m"
+	colorBoldRed = "\033[1;31m"
 )
 
-// colorHandler is a slog.Handler that writes colored log output to a terminal.
+// colorHandler is a slog.Handler that writes compact colored log output to a terminal.
+//
+// Output format:
+//
+//	18:05:03 INFO  telegram: connected  bot=raisa_aibot
+//	18:05:03 ERROR platform command registration failed  error="..."
+//
+// Attributes are shown inline, dimmed, without cluttering the message.
 type colorHandler struct {
 	opts  slog.HandlerOptions
 	w     io.Writer
@@ -46,50 +54,81 @@ func (h *colorHandler) Enabled(_ context.Context, level slog.Level) bool {
 }
 
 func (h *colorHandler) Handle(_ context.Context, r slog.Record) error {
-	// Level with color
+	var buf strings.Builder
+
+	// Timestamp (dimmed)
+	ts := r.Time.Format(time.TimeOnly) // HH:MM:SS
+	buf.WriteString(colorGray)
+	buf.WriteString(ts)
+	buf.WriteString(colorReset)
+	buf.WriteByte(' ')
+
+	// Level (colored, fixed width)
 	var levelColor, levelStr string
 	switch {
 	case r.Level >= slog.LevelError:
-		levelColor = colorRed
+		levelColor = colorBoldRed
 		levelStr = "ERROR"
 	case r.Level >= slog.LevelWarn:
 		levelColor = colorYellow
-		levelStr = "WARN"
+		levelStr = "WARN "
 	case r.Level >= slog.LevelInfo:
 		levelColor = colorGreen
-		levelStr = "INFO"
+		levelStr = "INFO "
 	default:
 		levelColor = colorCyan
 		levelStr = "DEBUG"
 	}
+	buf.WriteString(levelColor)
+	buf.WriteString(levelStr)
+	buf.WriteString(colorReset)
+	buf.WriteByte(' ')
 
-	// Format: time level msg key=value ...
-	ts := r.Time.Format(time.TimeOnly) // HH:MM:SS
-	line := fmt.Sprintf("%s%s%s %s%-5s%s %s",
-		colorGray, ts, colorReset,
-		levelColor, levelStr, colorReset,
-		r.Message)
-
-	// Append pre-added attrs
-	for _, a := range h.attrs {
-		line += fmt.Sprintf(" %s%s%s=%v", colorCyan, a.Key, colorReset, a.Value)
+	// Message (white/default, bold for errors)
+	if r.Level >= slog.LevelError {
+		buf.WriteString(colorRed)
+	}
+	buf.WriteString(r.Message)
+	if r.Level >= slog.LevelError {
+		buf.WriteString(colorReset)
 	}
 
-	// Append record attrs
-	r.Attrs(func(a slog.Attr) bool {
+	// Collect all attrs (pre-added + record)
+	writeAttr := func(a slog.Attr) {
 		key := a.Key
 		if h.group != "" {
 			key = h.group + "." + key
 		}
-		line += fmt.Sprintf(" %s%s%s=%v", colorCyan, key, colorReset, a.Value)
+		val := a.Value.String()
+		// Show "error" attr prominently
+		if key == "error" {
+			buf.WriteString("  ")
+			buf.WriteString(colorRed)
+			buf.WriteString(val)
+			buf.WriteString(colorReset)
+		} else {
+			buf.WriteString("  ")
+			buf.WriteString(colorGray)
+			buf.WriteString(key)
+			buf.WriteByte('=')
+			buf.WriteString(val)
+			buf.WriteString(colorReset)
+		}
+	}
+
+	for _, a := range h.attrs {
+		writeAttr(a)
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		writeAttr(a)
 		return true
 	})
 
-	line += "\n"
+	buf.WriteByte('\n')
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	_, err := io.WriteString(h.w, line)
+	_, err := io.WriteString(h.w, buf.String())
 	return err
 }
 
