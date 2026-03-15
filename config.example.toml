@@ -44,6 +44,10 @@ level = "info" # debug, info, warn, error
 # [display]
 # thinking_max_len = 300   # Max chars for thinking messages (default: 300) / 思考消息最大字符数（默认 300）
 # tool_max_len = 500       # Max chars for tool use messages (default: 500) / 工具调用消息最大字符数（默认 500）
+# compact_tools = true     # Compact one-line tool display with emoji (default: true)
+#                          # 紧凑单行工具显示，带 emoji（默认 true）
+#                          # true:  💻 `ls -la`
+#                          # false: 🔧 **Tool #1: Bash** (verbose multi-line format)
 
 # Agent idle timeout: max minutes between consecutive agent events before
 # considering the session stuck. Set to 0 to disable the timeout entirely.
@@ -175,6 +179,12 @@ level = "info" # debug, info, warn, error
 # [speech.groq]
 # api_key = "gsk_xxx"
 # model = "whisper-large-v3-turbo"
+#
+# # Alternative: Gemini (Google multimodal API)
+# # 备选：Gemini（Google 多模态 API）
+# [speech.gemini]
+# api_key = "AIza..."
+# model = "gemini-2.0-flash"
 
 # =============================================================================
 # Text-to-Speech (Voice Reply) / 文字转语音（语音回复）
@@ -589,6 +599,21 @@ app_secret = "your-feishu-app-secret"
 #                   # 允许的 Telegram 用户 ID，如 "123456789,987654321"；"*" 表示所有
 # group_reply_all = false  # If true, respond to ALL group messages without @mention / 设为 true 群聊无需 @ 也响应
 # share_session_in_channel = false  # If true, all users in a group share one agent session / 群聊共享会话
+#
+# # Forum Topics: map chat+topic combinations to working directories
+# # 论坛话题：将 chat+topic 组合映射到工作目录
+# # Each topic gets its own agent session with a separate work_dir.
+# # 每个 topic 获得独立的 agent 会话和工作目录。
+#
+# [[projects.platforms.options.topic_workdirs]]
+# chat_id = -1001234567890        # Supergroup chat ID / 超级群组 ID
+# topic_id = 42                   # Forum topic ID / 论坛话题 ID
+# work_dir = "/home/user/backend" # Working directory for this topic / 该话题的工作目录
+#
+# [[projects.platforms.options.topic_workdirs]]
+# chat_id = -1001234567890
+# topic_id = 0                    # General topic (or non-forum group) / 通用话题（或非论坛群组）
+# work_dir = "/home/user/main"
 
 # Slack (uncomment to enable / 取消注释以启用)
 # 1. Create an app at https://api.slack.com/apps / 创建应用

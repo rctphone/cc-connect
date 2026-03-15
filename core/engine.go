@@ -107,8 +107,9 @@ var RestartCh = make(chan RestartRequest, 1)
 // DisplayCfg controls truncation of intermediate messages.
 // A value of -1 means "use default", 0 means "no truncation".
 type DisplayCfg struct {
-	ThinkingMaxLen int // max runes for thinking preview; 0 = no truncation
-	ToolMaxLen     int // max runes for tool use preview; 0 = no truncation
+	ThinkingMaxLen int  // max runes for thinking preview; 0 = no truncation
+	ToolMaxLen     int  // max runes for tool use preview; 0 = no truncation
+	CompactTools   bool // compact one-line tool display with emoji; default true
 }
 
 // RateLimitCfg controls per-session message rate limiting.
@@ -142,7 +143,7 @@ type Engine struct {
 	commandSaveAddFunc func(name, description, prompt, exec, workDir string) error
 	commandSaveDelFunc func(name string) error
 
-	displaySaveFunc  func(thinkingMaxLen, toolMaxLen *int) error
+	displaySaveFunc  func(thinkingMaxLen, toolMaxLen *int, compactTools *bool) error
 	configReloadFunc func() (*ConfigReloadResult, error)
 
 	cronScheduler      *CronScheduler
@@ -241,7 +242,7 @@ func NewEngine(name string, ag Agent, platforms []Platform, sessionStorePath str
 		ctx:               ctx,
 		cancel:            cancel,
 		i18n:              NewI18n(lang),
-		display:           DisplayCfg{ThinkingMaxLen: defaultThinkingMaxLen, ToolMaxLen: defaultToolMaxLen},
+		display:           DisplayCfg{ThinkingMaxLen: defaultThinkingMaxLen, ToolMaxLen: defaultToolMaxLen, CompactTools: true},
 		commands:          NewCommandRegistry(),
 		skills:            NewSkillRegistry(),
 		aliases:           make(map[string]string),
@@ -376,7 +377,7 @@ func (e *Engine) SetCommandSaveDelFunc(fn func(name string) error) {
 	e.commandSaveDelFunc = fn
 }
 
-func (e *Engine) SetDisplaySaveFunc(fn func(thinkingMaxLen, toolMaxLen *int) error) {
+func (e *Engine) SetDisplaySaveFunc(fn func(thinkingMaxLen, toolMaxLen *int, compactTools *bool) error) {
 	e.displaySaveFunc = fn
 }
 
@@ -851,11 +852,28 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		}
 	}
 
-	// Multi-workspace resolution
+	// Topic-based workdir resolution (platform-driven, e.g. Telegram forum topics)
 	var wsAgent Agent
 	var wsSessions *SessionManager
 	var resolvedWorkspace string
-	if e.multiWorkspace {
+	if twr, ok := p.(TopicWorkDirResolver); ok {
+		if topicDir := twr.ResolveTopicWorkDir(msg.SessionKey); topicDir != "" {
+			resolvedWorkspace = topicDir
+			if e.workspacePool == nil {
+				e.workspacePool = newWorkspacePool(15 * time.Minute)
+			}
+			var err error
+			wsAgent, wsSessions, err = e.getOrCreateWorkspaceAgent(topicDir)
+			if err != nil {
+				slog.Error("failed to create topic workspace agent", "workspace", topicDir, "err", err)
+				e.reply(p, msg.ReplyCtx, fmt.Sprintf("Failed to initialize workspace: %v", err))
+				return
+			}
+		}
+	}
+
+	// Multi-workspace resolution (only if topic workdir didn't match)
+	if resolvedWorkspace == "" && e.multiWorkspace {
 		channelID := extractChannelID(msg.SessionKey)
 		workspace, channelName, err := e.resolveWorkspace(p, channelID)
 		if err != nil {
@@ -908,7 +926,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	sessions := e.sessions
 	agent := e.agent
 	interactiveKey := msg.SessionKey
-	if e.multiWorkspace && wsSessions != nil {
+	if wsSessions != nil {
 		sessions = wsSessions
 		agent = wsAgent
 		interactiveKey = resolvedWorkspace + ":" + msg.SessionKey
@@ -1600,27 +1618,37 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				if previewActive {
 					sp.detachPreview() // keep frozen preview visible as permanent message
 				}
-				toolInput := event.ToolInput
-				var formattedInput string
-				if toolInput == "" {
-					formattedInput = ""
-				} else if strings.Contains(toolInput, "```") {
-					// Already contains code blocks (pre-formatted by agent) — use as-is
-					formattedInput = toolInput
-				} else if strings.Contains(toolInput, "\n") || utf8.RuneCountInString(toolInput) > 200 {
-					lang := toolCodeLang(event.ToolName, toolInput)
-					formattedInput = fmt.Sprintf("```%s\n%s\n```", lang, toolInput)
-				} else {
-					switch event.ToolName {
-					case "shell", "run_shell_command", "Bash":
-						formattedInput = fmt.Sprintf("```bash\n%s\n```", toolInput)
-					default:
-						formattedInput = fmt.Sprintf("`%s`", toolInput)
+				if e.display.CompactTools {
+					emoji := toolEmoji(event.ToolName)
+					summary := compactToolInput(event.ToolName, event.ToolInput, 120)
+					if summary != "" {
+						e.send(p, replyCtx, emoji+" "+summary)
+					} else {
+						e.send(p, replyCtx, emoji+" "+event.ToolName)
 					}
-				}
-				toolMsg := fmt.Sprintf(e.i18n.T(MsgTool), toolCount, event.ToolName, formattedInput)
-				for _, chunk := range SplitMessageCodeFenceAware(toolMsg, maxPlatformMessageLen) {
-					e.send(p, replyCtx, chunk)
+				} else {
+					toolInput := event.ToolInput
+					var formattedInput string
+					if toolInput == "" {
+						formattedInput = ""
+					} else if strings.Contains(toolInput, "```") {
+						// Already contains code blocks (pre-formatted by agent) — use as-is
+						formattedInput = toolInput
+					} else if strings.Contains(toolInput, "\n") || utf8.RuneCountInString(toolInput) > 200 {
+						lang := toolCodeLang(event.ToolName, toolInput)
+						formattedInput = fmt.Sprintf("```%s\n%s\n```", lang, toolInput)
+					} else {
+						switch event.ToolName {
+						case "shell", "run_shell_command", "Bash":
+							formattedInput = fmt.Sprintf("```bash\n%s\n```", toolInput)
+						default:
+							formattedInput = fmt.Sprintf("`%s`", toolInput)
+						}
+					}
+					toolMsg := fmt.Sprintf(e.i18n.T(MsgTool), toolCount, event.ToolName, formattedInput)
+					for _, chunk := range SplitMessageCodeFenceAware(toolMsg, maxPlatformMessageLen) {
+						e.send(p, replyCtx, chunk)
+					}
 				}
 			}
 
@@ -6467,7 +6495,7 @@ func (e *Engine) configItems() []configItem {
 				}
 				e.display.ThinkingMaxLen = n
 				if e.displaySaveFunc != nil {
-					return e.displaySaveFunc(&n, nil)
+					return e.displaySaveFunc(&n, nil, nil)
 				}
 				return nil
 			},
@@ -6489,7 +6517,30 @@ func (e *Engine) configItems() []configItem {
 				}
 				e.display.ToolMaxLen = n
 				if e.displaySaveFunc != nil {
-					return e.displaySaveFunc(nil, &n)
+					return e.displaySaveFunc(nil, &n, nil)
+				}
+				return nil
+			},
+		},
+		{
+			key:    "compact_tools",
+			desc:   "Compact one-line tool display (true/false)",
+			descZh: "紧凑单行工具显示 (true/false)",
+			getFunc: func() string {
+				return fmt.Sprintf("%t", e.display.CompactTools)
+			},
+			setFunc: func(v string) error {
+				switch strings.ToLower(v) {
+				case "true", "1", "on":
+					e.display.CompactTools = true
+				case "false", "0", "off":
+					e.display.CompactTools = false
+				default:
+					return fmt.Errorf("invalid boolean: %s (use true/false)", v)
+				}
+				if e.displaySaveFunc != nil {
+					b := e.display.CompactTools
+					return e.displaySaveFunc(nil, nil, &b)
 				}
 				return nil
 			},
@@ -6992,6 +7043,73 @@ func toolCodeLang(toolName, input string) string {
 		return "diff"
 	}
 	return ""
+}
+
+// toolEmoji returns a compact emoji for a given tool name.
+func toolEmoji(toolName string) string {
+	switch toolName {
+	case "shell", "run_shell_command", "Bash":
+		return "💻"
+	case "Read", "read_file", "ReadFile":
+		return "📖"
+	case "Write", "write_file", "WriteFile", "Edit", "replace", "ReplaceInFile", "NotebookEdit":
+		return "✏️"
+	case "Grep", "search", "SearchFiles":
+		return "🔍"
+	case "Glob", "list_files", "ListFiles":
+		return "📁"
+	case "WebSearch":
+		return "🔎"
+	case "WebFetch":
+		return "🌐"
+	case "Agent":
+		return "🤖"
+	case "AskUserQuestion":
+		return "❓"
+	default:
+		return "🔧"
+	}
+}
+
+// compactToolInput extracts a concise one-line summary from tool input.
+func compactToolInput(toolName, toolInput string, maxLen int) string {
+	if toolInput == "" {
+		return ""
+	}
+
+	// Extract content from code blocks if present
+	input := toolInput
+	if idx := strings.Index(input, "```"); idx >= 0 {
+		after := input[idx+3:]
+		// skip language hint on first line
+		if nl := strings.Index(after, "\n"); nl >= 0 {
+			after = after[nl+1:]
+		}
+		if end := strings.Index(after, "```"); end >= 0 {
+			input = after[:end]
+		}
+	}
+
+	// Take first line only
+	input = strings.TrimSpace(input)
+	if nl := strings.IndexByte(input, '\n'); nl >= 0 {
+		input = input[:nl]
+	}
+	input = strings.TrimSpace(input)
+
+	// Truncate
+	runes := []rune(input)
+	if len(runes) > maxLen {
+		input = string(runes[:maxLen]) + "…"
+	}
+
+	// Format based on tool type
+	switch toolName {
+	case "shell", "run_shell_command", "Bash":
+		return "`" + input + "`"
+	default:
+		return "`" + input + "`"
+	}
 }
 
 // truncateIf truncates s to maxLen runes. 0 means no truncation.

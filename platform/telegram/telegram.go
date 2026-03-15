@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,8 +23,16 @@ func init() {
 }
 
 type replyContext struct {
-	chatID    int64
-	messageID int
+	chatID          int64
+	messageID       int
+	messageThreadID int // forum topic ID; 0 = General / no forum
+}
+
+// topicWorkDir maps a chat+topic combination to a working directory.
+type topicWorkDir struct {
+	ChatID  int64
+	TopicID int
+	WorkDir string
 }
 
 type Platform struct {
@@ -31,6 +40,7 @@ type Platform struct {
 	allowFrom             string
 	groupReplyAll         bool
 	shareSessionInChannel bool
+	topicWorkDirs         []topicWorkDir
 	bot                   *tgbotapi.BotAPI
 	httpClient            *http.Client
 	handler               core.MessageHandler
@@ -63,10 +73,95 @@ func New(opts map[string]any) (core.Platform, error) {
 
 	groupReplyAll, _ := opts["group_reply_all"].(bool)
 	shareSessionInChannel, _ := opts["share_session_in_channel"].(bool)
-	return &Platform{token: token, allowFrom: allowFrom, groupReplyAll: groupReplyAll, shareSessionInChannel: shareSessionInChannel, httpClient: httpClient}, nil
+
+	// Parse topic_workdirs configuration
+	var twds []topicWorkDir
+	if rawList, ok := opts["topic_workdirs"].([]any); ok {
+		for _, item := range rawList {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			var twd topicWorkDir
+			switch v := m["chat_id"].(type) {
+			case int64:
+				twd.ChatID = v
+			case float64:
+				twd.ChatID = int64(v)
+			case string:
+				twd.ChatID, _ = strconv.ParseInt(v, 10, 64)
+			}
+			switch v := m["topic_id"].(type) {
+			case int64:
+				twd.TopicID = int(v)
+			case float64:
+				twd.TopicID = int(v)
+			}
+			if dir, ok := m["work_dir"].(string); ok {
+				twd.WorkDir = dir
+			}
+			if twd.ChatID != 0 && twd.WorkDir != "" {
+				twds = append(twds, twd)
+				slog.Info("telegram: topic workdir mapping",
+					"chat_id", twd.ChatID, "topic_id", twd.TopicID, "work_dir", twd.WorkDir)
+			}
+		}
+	}
+
+	return &Platform{
+		token: token, allowFrom: allowFrom,
+		groupReplyAll: groupReplyAll, shareSessionInChannel: shareSessionInChannel,
+		topicWorkDirs: twds, httpClient: httpClient,
+	}, nil
 }
 
 func (p *Platform) Name() string { return "telegram" }
+
+// forumFields holds forum-specific fields extracted from raw update JSON.
+// The go-telegram-bot-api/v5 library doesn't support these fields natively.
+type forumFields struct {
+	MessageThreadID int
+	IsForum         bool
+}
+
+// extractForumFields parses forum-specific fields from raw update JSON.
+func extractForumFields(raw json.RawMessage, isCallback bool) forumFields {
+	var ff forumFields
+	if isCallback {
+		var parsed struct {
+			CallbackQuery *struct {
+				Message *struct {
+					MessageThreadID int `json:"message_thread_id"`
+					Chat            *struct {
+						IsForum bool `json:"is_forum"`
+					} `json:"chat"`
+				} `json:"message"`
+			} `json:"callback_query"`
+		}
+		if json.Unmarshal(raw, &parsed) == nil && parsed.CallbackQuery != nil && parsed.CallbackQuery.Message != nil {
+			ff.MessageThreadID = parsed.CallbackQuery.Message.MessageThreadID
+			if parsed.CallbackQuery.Message.Chat != nil {
+				ff.IsForum = parsed.CallbackQuery.Message.Chat.IsForum
+			}
+		}
+	} else {
+		var parsed struct {
+			Message *struct {
+				MessageThreadID int `json:"message_thread_id"`
+				Chat            *struct {
+					IsForum bool `json:"is_forum"`
+				} `json:"chat"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(raw, &parsed) == nil && parsed.Message != nil {
+			ff.MessageThreadID = parsed.Message.MessageThreadID
+			if parsed.Message.Chat != nil {
+				ff.IsForum = parsed.Message.Chat.IsForum
+			}
+		}
+	}
+	return ff
+}
 
 func (p *Platform) Start(handler core.MessageHandler) error {
 	p.handler = handler
@@ -90,196 +185,244 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 30
-	updates := bot.GetUpdatesChan(u)
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case update, ok := <-updates:
-				if !ok {
-					return
-				}
-				// Handle inline keyboard button clicks
-				if update.CallbackQuery != nil {
-					p.handleCallbackQuery(update.CallbackQuery)
-					continue
-				}
-
-				if update.Message == nil {
-					continue
-				}
-
-				msg := update.Message
-				msgTime := time.Unix(int64(msg.Date), 0)
-				if core.IsOldMessage(msgTime) {
-					slog.Debug("telegram: ignoring old message after restart", "date", msgTime)
-					continue
-				}
-				userName := msg.From.UserName
-				if userName == "" {
-					userName = strings.TrimSpace(msg.From.FirstName + " " + msg.From.LastName)
-				}
-				var sessionKey string
-				if p.shareSessionInChannel {
-					sessionKey = fmt.Sprintf("telegram:%d", msg.Chat.ID)
-				} else {
-					sessionKey = fmt.Sprintf("telegram:%d:%d", msg.Chat.ID, msg.From.ID)
-				}
-				userID := strconv.FormatInt(msg.From.ID, 10)
-				if !core.AllowList(p.allowFrom, userID) {
-					slog.Debug("telegram: message from unauthorized user", "user", userID)
-					continue
-				}
-
-				isGroup := msg.Chat.Type == "group" || msg.Chat.Type == "supergroup"
-
-				// In group chats, filter messages not directed at this bot (unless group_reply_all)
-				if isGroup && !p.groupReplyAll {
-					slog.Debug("telegram: checking group message", "bot", p.bot.Self.UserName, "text", msg.Text, "is_command", msg.IsCommand())
-					if !p.isDirectedAtBot(msg) {
-						continue
-					}
-				}
-
-				rctx := replyContext{chatID: msg.Chat.ID, messageID: msg.MessageID}
-
-				// Handle photo messages
-				if msg.Photo != nil && len(msg.Photo) > 0 {
-					best := msg.Photo[len(msg.Photo)-1]
-					imgData, err := p.downloadFile(best.FileID)
-					if err != nil {
-						slog.Error("telegram: download photo failed", "error", err)
-						continue
-					}
-					caption := msg.Caption
-					if p.bot.Self.UserName != "" {
-						caption = strings.ReplaceAll(caption, "@"+p.bot.Self.UserName, "")
-						caption = strings.TrimSpace(caption)
-					}
-					coreMsg := &core.Message{
-						SessionKey: sessionKey, Platform: "telegram",
-						UserID: userID, UserName: userName,
-						Content:   caption,
-						MessageID: strconv.Itoa(msg.MessageID),
-						Images:    []core.ImageAttachment{{MimeType: "image/jpeg", Data: imgData}},
-						ReplyCtx:  rctx,
-					}
-					p.handler(p, coreMsg)
-					continue
-				}
-
-				// Handle voice messages
-				if msg.Voice != nil {
-					slog.Debug("telegram: voice received", "user", userName, "duration", msg.Voice.Duration)
-					audioData, err := p.downloadFile(msg.Voice.FileID)
-					if err != nil {
-						slog.Error("telegram: download voice failed", "error", err)
-						continue
-					}
-					coreMsg := &core.Message{
-						SessionKey: sessionKey, Platform: "telegram",
-						UserID: userID, UserName: userName,
-						MessageID: strconv.Itoa(msg.MessageID),
-						Audio: &core.AudioAttachment{
-							MimeType: msg.Voice.MimeType,
-							Data:     audioData,
-							Format:   "ogg",
-							Duration: msg.Voice.Duration,
-						},
-						ReplyCtx: rctx,
-					}
-					p.handler(p, coreMsg)
-					continue
-				}
-
-				// Handle audio file messages
-				if msg.Audio != nil {
-					slog.Debug("telegram: audio file received", "user", userName)
-					audioData, err := p.downloadFile(msg.Audio.FileID)
-					if err != nil {
-						slog.Error("telegram: download audio failed", "error", err)
-						continue
-					}
-					format := "mp3"
-					if msg.Audio.MimeType != "" {
-						parts := strings.SplitN(msg.Audio.MimeType, "/", 2)
-						if len(parts) == 2 {
-							format = parts[1]
-						}
-					}
-					coreMsg := &core.Message{
-						SessionKey: sessionKey, Platform: "telegram",
-						UserID: userID, UserName: userName,
-						MessageID: strconv.Itoa(msg.MessageID),
-						Audio: &core.AudioAttachment{
-							MimeType: msg.Audio.MimeType,
-							Data:     audioData,
-							Format:   format,
-							Duration: msg.Audio.Duration,
-						},
-						ReplyCtx: rctx,
-					}
-					p.handler(p, coreMsg)
-					continue
-				}
-
-				// Handle document (file) messages
-				if msg.Document != nil {
-					slog.Info("telegram: document received", "user", userName, "file_name", msg.Document.FileName, "mime", msg.Document.MimeType, "file_id", msg.Document.FileID)
-					fileData, err := p.downloadFile(msg.Document.FileID)
-					if err != nil {
-						slog.Error("telegram: download document failed", "error", err)
-						continue
-					}
-					caption := msg.Caption
-					if p.bot.Self.UserName != "" {
-						caption = strings.ReplaceAll(caption, "@"+p.bot.Self.UserName, "")
-						caption = strings.TrimSpace(caption)
-					}
-					coreMsg := &core.Message{
-						SessionKey: sessionKey, Platform: "telegram",
-						UserID: userID, UserName: userName,
-						Content:   caption,
-						MessageID: strconv.Itoa(msg.MessageID),
-						Files:     []core.FileAttachment{{MimeType: msg.Document.MimeType, Data: fileData, FileName: msg.Document.FileName}},
-						ReplyCtx:  rctx,
-					}
-					p.handler(p, coreMsg)
-					continue
-				}
-
-				if msg.Text == "" {
-					continue
-				}
-
-				text := msg.Text
-				if p.bot.Self.UserName != "" {
-					text = strings.ReplaceAll(text, "@"+p.bot.Self.UserName, "")
-					text = strings.TrimSpace(text)
-				}
-
-				coreMsg := &core.Message{
-					SessionKey: sessionKey, Platform: "telegram",
-					UserID: userID, UserName: userName,
-					Content:   text,
-					MessageID: strconv.Itoa(msg.MessageID),
-					ReplyCtx:  rctx,
-				}
-
-				slog.Debug("telegram: message received", "user", userName, "chat", msg.Chat.ID)
-				p.handler(p, coreMsg)
-			}
-		}
-	}()
+	// Custom update polling to extract forum topic fields (message_thread_id, is_forum)
+	// that the go-telegram-bot-api/v5 library doesn't support.
+	go p.pollUpdates(ctx)
 
 	return nil
 }
 
-func (p *Platform) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
+// pollUpdates fetches updates using raw API calls to extract forum topic fields
+// alongside the standard tgbotapi.Update parsing.
+func (p *Platform) pollUpdates(ctx context.Context) {
+	offset := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		params := make(tgbotapi.Params)
+		params.AddNonZero("offset", offset)
+		params["timeout"] = "30"
+
+		resp, err := p.bot.MakeRequest("getUpdates", params)
+		if err != nil {
+			slog.Debug("telegram: getUpdates error", "error", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+			continue
+		}
+
+		var rawUpdates []json.RawMessage
+		if err := json.Unmarshal(resp.Result, &rawUpdates); err != nil {
+			slog.Warn("telegram: failed to parse raw updates", "error", err)
+			continue
+		}
+
+		for _, raw := range rawUpdates {
+			// Parse into standard tgbotapi.Update for all regular fields
+			var update tgbotapi.Update
+			if err := json.Unmarshal(raw, &update); err != nil {
+				continue
+			}
+			if update.UpdateID >= offset {
+				offset = update.UpdateID + 1
+			}
+
+			// Handle inline keyboard button clicks
+			if update.CallbackQuery != nil {
+				ff := extractForumFields(raw, true)
+				p.handleCallbackQueryWithForum(update.CallbackQuery, ff.MessageThreadID)
+				continue
+			}
+
+			if update.Message == nil {
+				continue
+			}
+
+			// Extract forum fields from raw JSON
+			ff := extractForumFields(raw, false)
+			p.handleMessageUpdate(update.Message, ff)
+		}
+	}
+}
+
+// sessionKeyForChat builds a session key incorporating forum topic information.
+func (p *Platform) sessionKeyForChat(chatID int64, userID int64, isForum bool, topicID int) string {
+	if isForum && topicID != 0 {
+		if p.shareSessionInChannel {
+			return fmt.Sprintf("telegram:%d:topic:%d", chatID, topicID)
+		}
+		return fmt.Sprintf("telegram:%d:topic:%d:%d", chatID, topicID, userID)
+	}
+	if p.shareSessionInChannel {
+		return fmt.Sprintf("telegram:%d", chatID)
+	}
+	return fmt.Sprintf("telegram:%d:%d", chatID, userID)
+}
+
+func (p *Platform) handleMessageUpdate(msg *tgbotapi.Message, ff forumFields) {
+	msgTime := time.Unix(int64(msg.Date), 0)
+	if core.IsOldMessage(msgTime) {
+		slog.Debug("telegram: ignoring old message after restart", "date", msgTime)
+		return
+	}
+	userName := msg.From.UserName
+	if userName == "" {
+		userName = strings.TrimSpace(msg.From.FirstName + " " + msg.From.LastName)
+	}
+	sessionKey := p.sessionKeyForChat(msg.Chat.ID, msg.From.ID, ff.IsForum, ff.MessageThreadID)
+	userID := strconv.FormatInt(msg.From.ID, 10)
+	if !core.AllowList(p.allowFrom, userID) {
+		slog.Debug("telegram: message from unauthorized user", "user", userID)
+		return
+	}
+
+	isGroup := msg.Chat.Type == "group" || msg.Chat.Type == "supergroup"
+
+	// In group chats, filter messages not directed at this bot (unless group_reply_all)
+	if isGroup && !p.groupReplyAll {
+		slog.Debug("telegram: checking group message", "bot", p.bot.Self.UserName, "text", msg.Text, "is_command", msg.IsCommand())
+		if !p.isDirectedAtBot(msg) {
+			return
+		}
+	}
+
+	rctx := replyContext{chatID: msg.Chat.ID, messageID: msg.MessageID, messageThreadID: ff.MessageThreadID}
+
+	// Handle photo messages
+	if msg.Photo != nil && len(msg.Photo) > 0 {
+		best := msg.Photo[len(msg.Photo)-1]
+		imgData, err := p.downloadFile(best.FileID)
+		if err != nil {
+			slog.Error("telegram: download photo failed", "error", err)
+			return
+		}
+		caption := msg.Caption
+		if p.bot.Self.UserName != "" {
+			caption = strings.ReplaceAll(caption, "@"+p.bot.Self.UserName, "")
+			caption = strings.TrimSpace(caption)
+		}
+		coreMsg := &core.Message{
+			SessionKey: sessionKey, Platform: "telegram",
+			UserID: userID, UserName: userName,
+			Content:   caption,
+			MessageID: strconv.Itoa(msg.MessageID),
+			Images:    []core.ImageAttachment{{MimeType: "image/jpeg", Data: imgData}},
+			ReplyCtx:  rctx,
+		}
+		p.handler(p, coreMsg)
+		return
+	}
+
+	// Handle voice messages
+	if msg.Voice != nil {
+		slog.Debug("telegram: voice received", "user", userName, "duration", msg.Voice.Duration)
+		audioData, err := p.downloadFile(msg.Voice.FileID)
+		if err != nil {
+			slog.Error("telegram: download voice failed", "error", err)
+			return
+		}
+		coreMsg := &core.Message{
+			SessionKey: sessionKey, Platform: "telegram",
+			UserID: userID, UserName: userName,
+			MessageID: strconv.Itoa(msg.MessageID),
+			Audio: &core.AudioAttachment{
+				MimeType: msg.Voice.MimeType,
+				Data:     audioData,
+				Format:   "ogg",
+				Duration: msg.Voice.Duration,
+			},
+			ReplyCtx: rctx,
+		}
+		p.handler(p, coreMsg)
+		return
+	}
+
+	// Handle audio file messages
+	if msg.Audio != nil {
+		slog.Debug("telegram: audio file received", "user", userName)
+		audioData, err := p.downloadFile(msg.Audio.FileID)
+		if err != nil {
+			slog.Error("telegram: download audio failed", "error", err)
+			return
+		}
+		format := "mp3"
+		if msg.Audio.MimeType != "" {
+			parts := strings.SplitN(msg.Audio.MimeType, "/", 2)
+			if len(parts) == 2 {
+				format = parts[1]
+			}
+		}
+		coreMsg := &core.Message{
+			SessionKey: sessionKey, Platform: "telegram",
+			UserID: userID, UserName: userName,
+			MessageID: strconv.Itoa(msg.MessageID),
+			Audio: &core.AudioAttachment{
+				MimeType: msg.Audio.MimeType,
+				Data:     audioData,
+				Format:   format,
+				Duration: msg.Audio.Duration,
+			},
+			ReplyCtx: rctx,
+		}
+		p.handler(p, coreMsg)
+		return
+	}
+
+	// Handle document (file) messages
+	if msg.Document != nil {
+		slog.Info("telegram: document received", "user", userName, "file_name", msg.Document.FileName, "mime", msg.Document.MimeType, "file_id", msg.Document.FileID)
+		fileData, err := p.downloadFile(msg.Document.FileID)
+		if err != nil {
+			slog.Error("telegram: download document failed", "error", err)
+			return
+		}
+		caption := msg.Caption
+		if p.bot.Self.UserName != "" {
+			caption = strings.ReplaceAll(caption, "@"+p.bot.Self.UserName, "")
+			caption = strings.TrimSpace(caption)
+		}
+		coreMsg := &core.Message{
+			SessionKey: sessionKey, Platform: "telegram",
+			UserID: userID, UserName: userName,
+			Content:   caption,
+			MessageID: strconv.Itoa(msg.MessageID),
+			Files:     []core.FileAttachment{{MimeType: msg.Document.MimeType, Data: fileData, FileName: msg.Document.FileName}},
+			ReplyCtx:  rctx,
+		}
+		p.handler(p, coreMsg)
+		return
+	}
+
+	if msg.Text == "" {
+		return
+	}
+
+	text := msg.Text
+	if p.bot.Self.UserName != "" {
+		text = strings.ReplaceAll(text, "@"+p.bot.Self.UserName, "")
+		text = strings.TrimSpace(text)
+	}
+
+	coreMsg := &core.Message{
+		SessionKey: sessionKey, Platform: "telegram",
+		UserID: userID, UserName: userName,
+		Content:   text,
+		MessageID: strconv.Itoa(msg.MessageID),
+		ReplyCtx:  rctx,
+	}
+
+	slog.Debug("telegram: message received", "user", userName, "chat", msg.Chat.ID, "topic", ff.MessageThreadID)
+	p.handler(p, coreMsg)
+}
+
+func (p *Platform) handleCallbackQueryWithForum(cb *tgbotapi.CallbackQuery, threadID int) {
 	if cb.Message == nil || cb.From == nil {
 		return
 	}
@@ -302,13 +445,10 @@ func (p *Platform) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	if userName == "" {
 		userName = strings.TrimSpace(cb.From.FirstName + " " + cb.From.LastName)
 	}
-	var sessionKey string
-	if p.shareSessionInChannel {
-		sessionKey = fmt.Sprintf("telegram:%d", chatID)
-	} else {
-		sessionKey = fmt.Sprintf("telegram:%d:%d", chatID, cb.From.ID)
-	}
-	rctx := replyContext{chatID: chatID, messageID: msgID}
+	// For callbacks, we detect forum from threadID > 0 (if the message was in a topic)
+	isForum := threadID > 0
+	sessionKey := p.sessionKeyForChat(chatID, cb.From.ID, isForum, threadID)
+	rctx := replyContext{chatID: chatID, messageID: msgID, messageThreadID: threadID}
 
 	// Command callbacks (cmd:/lang en, cmd:/mode yolo, etc.)
 	if strings.HasPrefix(data, "cmd:") {
@@ -319,10 +459,7 @@ func (p *Platform) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		if origText == "" {
 			origText = ""
 		}
-		edit := tgbotapi.NewEditMessageText(chatID, msgID, origText+"\n\n> "+command)
-		emptyMarkup := tgbotapi.NewInlineKeyboardMarkup()
-		edit.ReplyMarkup = &emptyMarkup
-		p.bot.Send(edit)
+		p.apiEditMessageText(chatID, msgID, origText+"\n\n> "+command, "", &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
 
 		p.handler(p, &core.Message{
 			SessionKey: sessionKey,
@@ -356,10 +493,7 @@ func (p *Platform) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		if origText == "" {
 			origText = "(question)"
 		}
-		edit := tgbotapi.NewEditMessageText(chatID, msgID, origText+"\n\n"+choiceLabel)
-		emptyMarkup := tgbotapi.NewInlineKeyboardMarkup()
-		edit.ReplyMarkup = &emptyMarkup
-		p.bot.Send(edit)
+		p.apiEditMessageText(chatID, msgID, origText+"\n\n"+choiceLabel, "", &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
 
 		p.handler(p, &core.Message{
 			SessionKey: sessionKey,
@@ -401,10 +535,7 @@ func (p *Platform) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	if origText == "" {
 		origText = "(permission request)"
 	}
-	edit := tgbotapi.NewEditMessageText(chatID, msgID, origText+"\n\n"+choiceLabel)
-	emptyMarkup := tgbotapi.NewInlineKeyboardMarkup()
-	edit.ReplyMarkup = &emptyMarkup
-	p.bot.Send(edit)
+	p.apiEditMessageText(chatID, msgID, origText+"\n\n"+choiceLabel, "", &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
 
 	p.handler(p, &core.Message{
 		SessionKey: sessionKey,
@@ -479,26 +610,81 @@ func (p *Platform) isDirectedAtBot(msg *tgbotapi.Message) bool {
 	return false
 }
 
+// --- Raw API helpers for forum topic support ---
+// The go-telegram-bot-api/v5 library doesn't expose message_thread_id in its
+// Chattable types (the params() method is unexported). These helpers use
+// BotAPI.MakeRequest directly to include the field.
+
+// apiSendMessage sends a message via the Telegram API, optionally into a forum topic.
+func (p *Platform) apiSendMessage(chatID int64, text, parseMode string, replyToMsgID, threadID int, markup *tgbotapi.InlineKeyboardMarkup) (int, error) {
+	params := make(tgbotapi.Params)
+	params.AddNonZero64("chat_id", chatID)
+	params.AddNonEmpty("text", text)
+	params.AddNonEmpty("parse_mode", parseMode)
+	params.AddNonZero("reply_to_message_id", replyToMsgID)
+	params.AddNonZero("message_thread_id", threadID)
+	if markup != nil {
+		data, _ := json.Marshal(markup)
+		params["reply_markup"] = string(data)
+	}
+	resp, err := p.bot.MakeRequest("sendMessage", params)
+	if err != nil {
+		return 0, err
+	}
+	var sent tgbotapi.Message
+	if err := json.Unmarshal(resp.Result, &sent); err != nil {
+		return 0, fmt.Errorf("telegram: parse sendMessage response: %w", err)
+	}
+	return sent.MessageID, nil
+}
+
+// apiEditMessageText edits a message's text.
+func (p *Platform) apiEditMessageText(chatID int64, msgID int, text, parseMode string, markup *tgbotapi.InlineKeyboardMarkup) error {
+	params := make(tgbotapi.Params)
+	params.AddNonZero64("chat_id", chatID)
+	params.AddNonZero("message_id", msgID)
+	params.AddNonEmpty("text", text)
+	params.AddNonEmpty("parse_mode", parseMode)
+	if markup != nil {
+		data, _ := json.Marshal(markup)
+		params["reply_markup"] = string(data)
+	}
+	_, err := p.bot.MakeRequest("editMessageText", params)
+	return err
+}
+
+// apiSendChatAction sends a chat action (e.g. "typing"), optionally in a forum topic.
+func (p *Platform) apiSendChatAction(chatID int64, threadID int, action string) {
+	params := make(tgbotapi.Params)
+	params.AddNonZero64("chat_id", chatID)
+	params.AddNonEmpty("action", action)
+	params.AddNonZero("message_thread_id", threadID)
+	p.bot.MakeRequest("sendChatAction", params)
+}
+
+// sendWithFallback sends a message with HTML mode, falling back to plain text on parse error.
+func (p *Platform) sendWithFallback(chatID int64, content string, replyToMsgID, threadID int, markup *tgbotapi.InlineKeyboardMarkup) (int, error) {
+	html := core.MarkdownToSimpleHTML(content)
+	msgID, err := p.apiSendMessage(chatID, html, tgbotapi.ModeHTML, replyToMsgID, threadID, markup)
+	if err != nil {
+		if strings.Contains(err.Error(), "can't parse") {
+			msgID, err = p.apiSendMessage(chatID, content, "", replyToMsgID, threadID, markup)
+		}
+		if err != nil {
+			return 0, err
+		}
+	}
+	return msgID, nil
+}
+
 func (p *Platform) Reply(ctx context.Context, rctx any, content string) error {
 	rc, ok := rctx.(replyContext)
 	if !ok {
 		return fmt.Errorf("telegram: invalid reply context type %T", rctx)
 	}
-
-	html := core.MarkdownToSimpleHTML(content)
-	reply := tgbotapi.NewMessage(rc.chatID, html)
-	reply.ReplyToMessageID = rc.messageID
-	reply.ParseMode = tgbotapi.ModeHTML
-
-	if _, err := p.bot.Send(reply); err != nil {
-		if strings.Contains(err.Error(), "can't parse") {
-			reply.Text = content
-			reply.ParseMode = ""
-			_, err = p.bot.Send(reply)
-		}
-		if err != nil {
-			return fmt.Errorf("telegram: send: %w", err)
-		}
+	_, err := p.sendWithFallback(rc.chatID, content, rc.messageID, rc.messageThreadID, nil)
+	if err != nil {
+		return fmt.Errorf("telegram: reply: %w", err)
 	}
 	return nil
 }
@@ -509,20 +695,9 @@ func (p *Platform) Send(ctx context.Context, rctx any, content string) error {
 	if !ok {
 		return fmt.Errorf("telegram: invalid reply context type %T", rctx)
 	}
-
-	html := core.MarkdownToSimpleHTML(content)
-	msg := tgbotapi.NewMessage(rc.chatID, html)
-	msg.ParseMode = tgbotapi.ModeHTML
-
-	if _, err := p.bot.Send(msg); err != nil {
-		if strings.Contains(err.Error(), "can't parse") {
-			msg.Text = content
-			msg.ParseMode = ""
-			_, err = p.bot.Send(msg)
-		}
-		if err != nil {
-			return fmt.Errorf("telegram: send: %w", err)
-		}
+	_, err := p.sendWithFallback(rc.chatID, content, 0, rc.messageThreadID, nil)
+	if err != nil {
+		return fmt.Errorf("telegram: send: %w", err)
 	}
 	return nil
 }
@@ -542,21 +717,11 @@ func (p *Platform) SendWithButtons(ctx context.Context, rctx any, content string
 		}
 		rows = append(rows, btns)
 	}
+	markup := &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: rows}
 
-	html := core.MarkdownToSimpleHTML(content)
-	msg := tgbotapi.NewMessage(rc.chatID, html)
-	msg.ParseMode = tgbotapi.ModeHTML
-	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-
-	if _, err := p.bot.Send(msg); err != nil {
-		if strings.Contains(err.Error(), "can't parse") {
-			msg.Text = content
-			msg.ParseMode = ""
-			_, err = p.bot.Send(msg)
-		}
-		if err != nil {
-			return fmt.Errorf("telegram: sendWithButtons: %w", err)
-		}
+	_, err := p.sendWithFallback(rc.chatID, content, 0, rc.messageThreadID, markup)
+	if err != nil {
+		return fmt.Errorf("telegram: sendWithButtons: %w", err)
 	}
 	return nil
 }
@@ -593,8 +758,12 @@ func (p *Platform) downloadFile(fileID string) ([]byte, error) {
 }
 
 func (p *Platform) ReconstructReplyCtx(sessionKey string) (any, error) {
-	// telegram:{chatID}:{userID}
-	parts := strings.SplitN(sessionKey, ":", 3)
+	// Formats:
+	//   telegram:{chatID}:{userID}           (non-forum)
+	//   telegram:{chatID}                    (shared, non-forum)
+	//   telegram:{chatID}:topic:{topicID}:{userID}  (forum)
+	//   telegram:{chatID}:topic:{topicID}           (shared, forum)
+	parts := strings.SplitN(sessionKey, ":", 5)
 	if len(parts) < 2 || parts[0] != "telegram" {
 		return nil, fmt.Errorf("telegram: invalid session key %q", sessionKey)
 	}
@@ -602,13 +771,22 @@ func (p *Platform) ReconstructReplyCtx(sessionKey string) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("telegram: invalid chat ID in %q", sessionKey)
 	}
-	return replyContext{chatID: chatID}, nil
+	rc := replyContext{chatID: chatID}
+	// Check for topic format: telegram:{chatID}:topic:{topicID}...
+	if len(parts) >= 4 && parts[2] == "topic" {
+		topicID, err := strconv.Atoi(parts[3])
+		if err == nil {
+			rc.messageThreadID = topicID
+		}
+	}
+	return rc, nil
 }
 
-// telegramPreviewHandle stores the chat and message IDs for an editable preview message.
+// telegramPreviewHandle stores the chat, message, and thread IDs for an editable preview message.
 type telegramPreviewHandle struct {
-	chatID    int64
-	messageID int
+	chatID          int64
+	messageID       int
+	messageThreadID int
 }
 
 // SendPreviewStart sends a new message and returns a handle for subsequent edits.
@@ -620,22 +798,11 @@ func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content strin
 		return nil, fmt.Errorf("telegram: invalid reply context type %T", rctx)
 	}
 
-	html := core.MarkdownToSimpleHTML(content)
-	msg := tgbotapi.NewMessage(rc.chatID, html)
-	msg.ParseMode = tgbotapi.ModeHTML
-
-	sent, err := p.bot.Send(msg)
+	msgID, err := p.sendWithFallback(rc.chatID, content, 0, rc.messageThreadID, nil)
 	if err != nil {
-		if strings.Contains(err.Error(), "can't parse") {
-			msg.Text = content
-			msg.ParseMode = ""
-			sent, err = p.bot.Send(msg)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("telegram: send preview: %w", err)
-		}
+		return nil, fmt.Errorf("telegram: send preview: %w", err)
 	}
-	return &telegramPreviewHandle{chatID: rc.chatID, messageID: sent.MessageID}, nil
+	return &telegramPreviewHandle{chatID: rc.chatID, messageID: msgID, messageThreadID: rc.messageThreadID}, nil
 }
 
 // UpdateMessage edits an existing message identified by previewHandle.
@@ -651,10 +818,8 @@ func (p *Platform) UpdateMessage(ctx context.Context, previewHandle any, content
 		"content_prefix", truncateForLog(content, 80),
 		"html_prefix", truncateForLog(html, 80))
 
-	edit := tgbotapi.NewEditMessageText(h.chatID, h.messageID, html)
-	edit.ParseMode = tgbotapi.ModeHTML
-
-	if _, err := p.bot.Send(edit); err != nil {
+	err := p.apiEditMessageText(h.chatID, h.messageID, html, tgbotapi.ModeHTML, nil)
+	if err != nil {
 		errMsg := err.Error()
 		slog.Debug("telegram: UpdateMessage HTML failed", "error", errMsg)
 		if strings.Contains(errMsg, "not modified") {
@@ -662,9 +827,8 @@ func (p *Platform) UpdateMessage(ctx context.Context, previewHandle any, content
 		}
 		if strings.Contains(errMsg, "can't parse") {
 			slog.Debug("telegram: UpdateMessage falling back to plain text", "full_html", html)
-			edit.Text = content
-			edit.ParseMode = ""
-			if _, err2 := p.bot.Send(edit); err2 != nil {
+			err2 := p.apiEditMessageText(h.chatID, h.messageID, content, "", nil)
+			if err2 != nil {
 				if strings.Contains(err2.Error(), "not modified") {
 					return nil
 				}
@@ -693,8 +857,7 @@ func (p *Platform) StartTyping(ctx context.Context, rctx any) (stop func()) {
 		return func() {}
 	}
 
-	action := tgbotapi.NewChatAction(rc.chatID, tgbotapi.ChatTyping)
-	p.bot.Send(action)
+	p.apiSendChatAction(rc.chatID, rc.messageThreadID, tgbotapi.ChatTyping)
 
 	done := make(chan struct{})
 	go func() {
@@ -707,7 +870,7 @@ func (p *Platform) StartTyping(ctx context.Context, rctx any) (stop func()) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				p.bot.Send(action)
+				p.apiSendChatAction(rc.chatID, rc.messageThreadID, tgbotapi.ChatTyping)
 			}
 		}
 	}()
@@ -723,6 +886,37 @@ func (p *Platform) Stop() error {
 		p.bot.StopReceivingUpdates()
 	}
 	return nil
+}
+
+// ResolveTopicWorkDir implements core.TopicWorkDirResolver.
+// It looks up the configured work_dir for the given session key's chat+topic combination.
+func (p *Platform) ResolveTopicWorkDir(sessionKey string) string {
+	if len(p.topicWorkDirs) == 0 {
+		return ""
+	}
+	chatID, topicID := parseSessionKeyForTopic(sessionKey)
+	if chatID == 0 {
+		return ""
+	}
+	for _, twd := range p.topicWorkDirs {
+		if twd.ChatID == chatID && twd.TopicID == topicID {
+			return twd.WorkDir
+		}
+	}
+	return ""
+}
+
+// parseSessionKeyForTopic extracts chatID and topicID from a session key.
+func parseSessionKeyForTopic(sessionKey string) (chatID int64, topicID int) {
+	parts := strings.SplitN(sessionKey, ":", 5)
+	if len(parts) < 2 || parts[0] != "telegram" {
+		return 0, 0
+	}
+	chatID, _ = strconv.ParseInt(parts[1], 10, 64)
+	if len(parts) >= 4 && parts[2] == "topic" {
+		topicID, _ = strconv.Atoi(parts[3])
+	}
+	return chatID, topicID
 }
 
 // RegisterCommands registers bot commands with Telegram for the command menu.

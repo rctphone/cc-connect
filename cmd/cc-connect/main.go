@@ -235,12 +235,16 @@ func main() {
 			dcfg := core.DisplayCfg{
 				ThinkingMaxLen: 300,
 				ToolMaxLen:     500,
+				CompactTools:   true,
 			}
 			if cfg.Display.ThinkingMaxLen != nil {
 				dcfg.ThinkingMaxLen = *cfg.Display.ThinkingMaxLen
 			}
 			if cfg.Display.ToolMaxLen != nil {
 				dcfg.ToolMaxLen = *cfg.Display.ToolMaxLen
+			}
+			if cfg.Display.CompactTools != nil {
+				dcfg.CompactTools = *cfg.Display.CompactTools
 			}
 			engine.SetDisplayConfig(dcfg)
 		}
@@ -283,8 +287,8 @@ func main() {
 				})
 			}
 		}
-		engine.SetDisplaySaveFunc(func(thinkingMaxLen, toolMaxLen *int) error {
-			return config.SaveDisplayConfig(thinkingMaxLen, toolMaxLen)
+		engine.SetDisplaySaveFunc(func(thinkingMaxLen, toolMaxLen *int, compactTools *bool) error {
+			return config.SaveDisplayConfig(thinkingMaxLen, toolMaxLen, compactTools)
 		})
 
 		// Wire idle timeout
@@ -335,6 +339,15 @@ func main() {
 					speechCfg.STT = core.NewQwenASR(apiKey, baseURL, model)
 				} else {
 					slog.Warn("speech: qwen provider enabled but api_key is empty")
+				}
+			case "gemini":
+				apiKey := cfg.Speech.Gemini.APIKey
+				baseURL := cfg.Speech.Gemini.BaseURL
+				model := cfg.Speech.Gemini.Model
+				if apiKey != "" {
+					speechCfg.STT = core.NewGeminiSTT(apiKey, baseURL, model)
+				} else {
+					slog.Warn("speech: gemini provider enabled but api_key is empty")
 				}
 			default: // "openai" or unspecified
 				apiKey := cfg.Speech.OpenAI.APIKey
@@ -841,12 +854,15 @@ func reloadConfig(configPath, projName string, engine *core.Engine) (*core.Confi
 	}
 
 	// Reload display config
-	dcfg := core.DisplayCfg{ThinkingMaxLen: 300, ToolMaxLen: 500}
+	dcfg := core.DisplayCfg{ThinkingMaxLen: 300, ToolMaxLen: 500, CompactTools: true}
 	if cfg.Display.ThinkingMaxLen != nil {
 		dcfg.ThinkingMaxLen = *cfg.Display.ThinkingMaxLen
 	}
 	if cfg.Display.ToolMaxLen != nil {
 		dcfg.ToolMaxLen = *cfg.Display.ToolMaxLen
+	}
+	if cfg.Display.CompactTools != nil {
+		dcfg.CompactTools = *cfg.Display.CompactTools
 	}
 	engine.SetDisplayConfig(dcfg)
 	result.DisplayUpdated = true

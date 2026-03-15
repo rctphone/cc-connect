@@ -67,8 +67,9 @@ type ManagementConfig struct {
 
 // DisplayConfig controls how intermediate messages (thinking, tool output) are shown.
 type DisplayConfig struct {
-	ThinkingMaxLen  *int `toml:"thinking_max_len"`    // max chars for thinking messages; 0 = no truncation; default 300
-	ToolMaxLen      *int `toml:"tool_max_len"`        // max chars for tool use messages; 0 = no truncation; default 500
+	ThinkingMaxLen  *int  `toml:"thinking_max_len"`    // max chars for thinking messages; 0 = no truncation; default 300
+	ToolMaxLen      *int  `toml:"tool_max_len"`        // max chars for tool use messages; 0 = no truncation; default 500
+	CompactTools    *bool `toml:"compact_tools"`       // compact one-line tool display with emoji; default true
 }
 
 // StreamPreviewConfig controls real-time streaming preview in IM.
@@ -89,7 +90,7 @@ type RateLimitConfig struct {
 // SpeechConfig configures speech-to-text for voice messages.
 type SpeechConfig struct {
 	Enabled  bool   `toml:"enabled"`
-	Provider string `toml:"provider"` // "openai" | "groq" | "qwen"
+	Provider string `toml:"provider"` // "openai" | "groq" | "qwen" | "gemini"
 	Language string `toml:"language"` // e.g. "zh", "en"; empty = auto-detect
 	OpenAI   struct {
 		APIKey  string `toml:"api_key"`
@@ -105,6 +106,11 @@ type SpeechConfig struct {
 		BaseURL string `toml:"base_url"`
 		Model   string `toml:"model"`
 	} `toml:"qwen"`
+	Gemini struct {
+		APIKey  string `toml:"api_key"`
+		BaseURL string `toml:"base_url"`
+		Model   string `toml:"model"`
+	} `toml:"gemini"`
 }
 
 // TTSConfig configures text-to-speech output (mirrors SpeechConfig style).
@@ -528,7 +534,7 @@ func RemoveAlias(name string) error {
 }
 
 // SaveDisplayConfig persists the display truncation settings to the config file.
-func SaveDisplayConfig(thinkingMaxLen, toolMaxLen *int) error {
+func SaveDisplayConfig(thinkingMaxLen, toolMaxLen *int, compactTools *bool) error {
 	configMu.Lock()
 	defer configMu.Unlock()
 	if ConfigPath == "" {
@@ -547,6 +553,9 @@ func SaveDisplayConfig(thinkingMaxLen, toolMaxLen *int) error {
 	}
 	if toolMaxLen != nil {
 		cfg.Display.ToolMaxLen = toolMaxLen
+	}
+	if compactTools != nil {
+		cfg.Display.CompactTools = compactTools
 	}
 	return saveConfig(cfg)
 }

@@ -323,3 +323,10 @@ type CommandRegistrar interface {
 type ChannelNameResolver interface {
 	ResolveChannelName(channelID string) (string, error)
 }
+
+// TopicWorkDirResolver is an optional interface for platforms that support
+// mapping chat+topic combinations to specific working directories.
+// The engine checks this before multi-workspace resolution.
+type TopicWorkDirResolver interface {
+	ResolveTopicWorkDir(sessionKey string) string
+}

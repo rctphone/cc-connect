@@ -2726,3 +2726,60 @@ func TestCmdBindSetup_UsesSharedLogic(t *testing.T) {
 		t.Error("expected instructions written to file")
 	}
 }
+
+func TestToolEmoji(t *testing.T) {
+	tests := []struct {
+		tool string
+		want string
+	}{
+		{"Bash", "💻"},
+		{"shell", "💻"},
+		{"run_shell_command", "💻"},
+		{"Read", "📖"},
+		{"read_file", "📖"},
+		{"Write", "✏️"},
+		{"Edit", "✏️"},
+		{"Grep", "🔍"},
+		{"Glob", "📁"},
+		{"WebSearch", "🔎"},
+		{"WebFetch", "🌐"},
+		{"Agent", "🤖"},
+		{"AskUserQuestion", "❓"},
+		{"SomeUnknownTool", "🔧"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tool, func(t *testing.T) {
+			got := toolEmoji(tt.tool)
+			if got != tt.want {
+				t.Errorf("toolEmoji(%q) = %q, want %q", tt.tool, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompactToolInput(t *testing.T) {
+	tests := []struct {
+		name     string
+		tool     string
+		input    string
+		maxLen   int
+		want     string
+	}{
+		{"empty input", "Bash", "", 120, ""},
+		{"simple command", "Bash", "ls -la", 120, "`ls -la`"},
+		{"multiline takes first", "Bash", "line1\nline2\nline3", 120, "`line1`"},
+		{"code block extraction", "Bash", "```bash\necho hello\n```", 120, "`echo hello`"},
+		{"truncation", "Read", "a very long file path that exceeds max", 10, "`a very lon…`"},
+		{"file path", "Read", "src/main.go", 120, "`src/main.go`"},
+		{"search pattern", "Grep", "error handling", 120, "`error handling`"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := compactToolInput(tt.tool, tt.input, tt.maxLen)
+			if got != tt.want {
+				t.Errorf("compactToolInput(%q, %q, %d) = %q, want %q",
+					tt.tool, tt.input, tt.maxLen, got, tt.want)
+			}
+		})
+	}
+}
