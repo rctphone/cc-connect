@@ -964,6 +964,22 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		return
 	}
 
+	// If there are queued messages waiting, enqueue this one too to maintain
+	// FIFO order instead of jumping ahead of the queue.
+	e.interactiveMu.Lock()
+	queueState, hasState := e.interactiveStates[interactiveKey]
+	e.interactiveMu.Unlock()
+	if hasState && queueState != nil {
+		queueState.mu.Lock()
+		hasQueue := len(queueState.queue.items) > 0
+		queueState.mu.Unlock()
+		if hasQueue {
+			session.Unlock()
+			e.enqueueMessage(p, msg, agent, sessions, interactiveKey, resolvedWorkspace)
+			return
+		}
+	}
+
 	slog.Info("processing message",
 		"platform", msg.Platform,
 		"user", msg.UserName,
@@ -1634,9 +1650,11 @@ func (e *Engine) updateQueueDisplay(state *interactiveState, p Platform, replyCt
 
 	pinner, canPin := p.(PinnableMessage)
 
+	slog.Info("updateQueueDisplay", "items", len(items), "has_pinned", pinnedHandle != nil, "can_pin", canPin)
+
 	if pinnedHandle != nil && canPin {
 		if err := pinner.EditPinned(e.ctx, pinnedHandle, text); err != nil {
-			slog.Debug("updateQueueDisplay: edit pinned failed", "error", err)
+			slog.Warn("updateQueueDisplay: edit pinned failed", "error", err, "items", len(items))
 		}
 	} else if canPin {
 		handle, err := pinner.SendAndPin(e.ctx, replyCtx, text)
