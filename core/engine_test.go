@@ -680,6 +680,52 @@ func TestHandlePendingPermission_MultiWorkspaceLookup(t *testing.T) {
 	}
 }
 
+func TestHandlePendingPermission_ConfigWorkspaceLookup(t *testing.T) {
+	dir := t.TempDir()
+	p := &stubPlatformEngine{n: "telegram"}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+
+	e.SetConfigWorkspaces([]ConfigWorkspace{
+		{ChannelKey: "-100123:topic:42", WorkDir: dir},
+	})
+
+	sessionKey := "telegram:-100123:topic:42:456"
+	interactiveKey := dir + ":" + sessionKey
+
+	pending := &pendingPermission{
+		RequestID: "req-cfg-1",
+		ToolInput: map[string]any{"command": "ls"},
+		Resolved:  make(chan struct{}),
+	}
+	session := &recordingAgentSession{}
+
+	e.interactiveMu.Lock()
+	e.interactiveStates[interactiveKey] = &interactiveState{
+		agentSession: session,
+		pending:      pending,
+	}
+	e.interactiveMu.Unlock()
+
+	msg := &Message{SessionKey: sessionKey, ReplyCtx: "ctx"}
+
+	if !e.handlePendingPermission(p, msg, "allow") {
+		t.Fatal("expected pending permission to be handled via config workspace suffix match")
+	}
+
+	select {
+	case <-pending.Resolved:
+	default:
+		t.Fatal("expected pending permission to be resolved")
+	}
+
+	if session.calls != 1 {
+		t.Fatalf("RespondPermission calls = %d, want 1", session.calls)
+	}
+	if session.lastResult.Behavior != "allow" {
+		t.Fatalf("RespondPermission behavior = %q, want %q", session.lastResult.Behavior, "allow")
+	}
+}
+
 // --- quiet tests ---
 
 func TestQuietSessionToggle(t *testing.T) {
