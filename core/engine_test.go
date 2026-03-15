@@ -3209,3 +3209,131 @@ func TestProcessNextInQueue_SendsConfirmation(t *testing.T) {
 		t.Fatalf("expected 1 row of 3 buttons, got %d rows", len(p.buttonRows))
 	}
 }
+
+// stubQueuePinReaderPlatform extends stubPinnablePlatform with QueuePinReader.
+type stubQueuePinReaderPlatform struct {
+	stubPinnablePlatform
+	findContent string
+	findHandle  any
+	findErr     error
+}
+
+func (p *stubQueuePinReaderPlatform) FindQueuePin(_ context.Context, _ any) (string, any, error) {
+	return p.findContent, p.findHandle, p.findErr
+}
+
+// TestHandleQueueResponseStateless_Clear tests that queue:clear works without in-memory state.
+func TestHandleQueueResponseStateless_Clear(t *testing.T) {
+	e := newTestEngine()
+	content := formatQueuePin([]string{"msg1", "msg2"})
+	p := &stubQueuePinReaderPlatform{
+		stubPinnablePlatform: stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}},
+		findContent:          content,
+		findHandle:           "pinned-1",
+	}
+
+	// NO interactiveState — simulates crashed/cleaned-up state
+	msg := &Message{SessionKey: "test:user1", Content: "queue:clear", ReplyCtx: "ctx", UserName: "user1"}
+	handled := e.handleQueueResponse(p, msg, "queue:clear")
+
+	if !handled {
+		t.Fatal("expected queue:clear to be handled in stateless mode")
+	}
+	if !p.unpinned {
+		t.Fatal("expected Unpin to be called")
+	}
+}
+
+// TestHandleQueueResponseStateless_Skip tests that queue:skip works without in-memory state.
+func TestHandleQueueResponseStateless_Skip(t *testing.T) {
+	e := newTestEngine()
+	content := formatQueuePin([]string{"first", "second"})
+	p := &stubQueuePinReaderPlatform{
+		stubPinnablePlatform: stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}},
+		findContent:          content,
+		findHandle:           "pinned-1",
+	}
+
+	msg := &Message{SessionKey: "test:user1", Content: "queue:skip", ReplyCtx: "ctx", UserName: "user1"}
+	handled := e.handleQueueResponse(p, msg, "queue:skip")
+
+	if !handled {
+		t.Fatal("expected queue:skip to be handled in stateless mode")
+	}
+
+	// Give goroutine time to create state and show buttons
+	time.Sleep(50 * time.Millisecond)
+
+	// State should now exist with remaining items
+	e.interactiveMu.Lock()
+	state, ok := e.interactiveStates["test:user1"]
+	e.interactiveMu.Unlock()
+
+	if !ok || state == nil {
+		t.Fatal("expected interactiveState to be created by stateless skip")
+	}
+
+	state.mu.Lock()
+	remaining := parseQueuePin(state.queue.cachedContent)
+	state.mu.Unlock()
+
+	if len(remaining) != 1 || remaining[0] != "second" {
+		t.Fatalf("expected 1 remaining item 'second', got %v", remaining)
+	}
+}
+
+// TestHandleMessage_QueueCallbackNeverEnqueued ensures queue:* callbacks don't become queue items.
+func TestHandleMessage_QueueCallbackNeverEnqueued(t *testing.T) {
+	e := newTestEngine()
+	p := &stubQueuePinReaderPlatform{
+		stubPinnablePlatform: stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}},
+	}
+
+	// No state, no pin — queue:clear should still be consumed (not enqueued)
+	msg := &Message{
+		SessionKey: "test:user1",
+		Content:    "queue:clear",
+		Platform:   "test",
+		ReplyCtx:   "ctx",
+		UserName:   "user1",
+	}
+	e.handleMessage(p, msg)
+
+	// The message should NOT have been enqueued
+	e.interactiveMu.Lock()
+	state := e.interactiveStates["test:user1"]
+	e.interactiveMu.Unlock()
+
+	if state != nil {
+		state.mu.Lock()
+		items := parseQueuePin(state.queue.cachedContent)
+		state.mu.Unlock()
+		if len(items) > 0 {
+			t.Fatalf("queue:clear was enqueued as text: %v", items)
+		}
+	}
+}
+
+// TestWriteQueuePin_EmptyDiscoversPinHandle tests that writeQueuePin discovers and
+// deletes the pinned message even when pinnedHandle is nil.
+func TestWriteQueuePin_EmptyDiscoversPinHandle(t *testing.T) {
+	e := newTestEngine()
+	p := &stubQueuePinReaderPlatform{
+		stubPinnablePlatform: stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}},
+		findContent:          formatQueuePin([]string{"old"}),
+		findHandle:           "discovered-pin",
+	}
+
+	state := &interactiveState{
+		platform: p,
+		replyCtx: "ctx",
+	}
+	// pinnedHandle is nil — simulates lost handle
+	state.queue.cachedContent = formatQueuePin([]string{"old"})
+
+	e.writeQueuePin(state, p, "ctx", []string{}) // empty items
+
+	if !p.unpinned {
+		t.Fatal("expected Unpin to be called via pin discovery")
+	}
+}

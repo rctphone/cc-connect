@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1000,8 +1001,11 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		return
 	}
 
-	// Queue responses bypass the session lock
-	if e.handleQueueResponse(p, msg, content) {
+	// Queue responses bypass the session lock.
+	// Even if not handled, never let queue:* callbacks fall through to the
+	// agent — they would be enqueued as plain text which is confusing.
+	if strings.HasPrefix(content, "queue:") {
+		e.handleQueueResponse(p, msg, content)
 		return
 	}
 
@@ -1659,7 +1663,16 @@ func (e *Engine) writeQueuePin(state *interactiveState, p Platform, replyCtx any
 	state.mu.Unlock()
 
 	if len(items) == 0 {
-		// Queue empty — unpin if needed
+		// Queue empty — unpin and delete the pinned message
+		if pinnedHandle == nil {
+			// pinnedHandle lost (e.g. state recreated after crash) — try to discover it
+			if reader, ok := p.(QueuePinReader); ok {
+				_, h, err := reader.FindQueuePin(e.ctx, replyCtx)
+				if err == nil && h != nil {
+					pinnedHandle = h
+				}
+			}
+		}
 		if pinnedHandle != nil {
 			if pinner, ok := p.(PinnableMessage); ok {
 				pinner.Unpin(e.ctx, pinnedHandle)
@@ -1822,18 +1835,23 @@ func (e *Engine) handleQueueResponse(p Platform, msg *Message, content string) b
 
 	action := strings.TrimPrefix(content, "queue:")
 
-	// Find the interactiveState for this session
+	// Find the interactiveState for this session.
+	// If no state exists (e.g. agent crashed, session cleaned up), handle
+	// the callback gracefully: discover the pin directly for clear/skip.
 	interactiveKey := e.findQueueInteractiveKey(msg.SessionKey)
-	if interactiveKey == "" {
-		return false
+
+	var state *interactiveState
+	if interactiveKey != "" {
+		e.interactiveMu.Lock()
+		state = e.interactiveStates[interactiveKey]
+		e.interactiveMu.Unlock()
 	}
 
-	e.interactiveMu.Lock()
-	state, ok := e.interactiveStates[interactiveKey]
-	e.interactiveMu.Unlock()
-
-	if !ok || state == nil {
-		return false
+	if state == nil {
+		// No in-memory state — try to handle directly via pin discovery
+		slog.Warn("handleQueueResponse: no interactive state, attempting pin discovery",
+			"session_key", msg.SessionKey, "action", action)
+		return e.handleQueueResponseStateless(p, msg, action)
 	}
 
 	state.mu.Lock()
@@ -1842,7 +1860,9 @@ func (e *Engine) handleQueueResponse(p Platform, msg *Message, content string) b
 	// processNextInQueue (launched via goroutine) has set confirmPending=true.
 	if !state.queue.confirmPending && state.queue.cachedContent == "" {
 		state.mu.Unlock()
-		return false
+		slog.Warn("handleQueueResponse: no pending confirmation and no cached content, trying pin discovery",
+			"interactive_key", interactiveKey, "action", action)
+		return e.handleQueueResponseStateless(p, msg, action)
 	}
 	state.queue.confirmPending = false
 
@@ -1930,6 +1950,15 @@ func (e *Engine) handleQueueResponse(p Platform, msg *Message, content string) b
 		state.queue.cachedContent = ""
 		state.mu.Unlock()
 
+		// Discover pin if handle was lost (e.g. after restart)
+		if pinnedHandle == nil {
+			if reader, ok := p.(QueuePinReader); ok {
+				_, h, err := reader.FindQueuePin(e.ctx, msg.ReplyCtx)
+				if err == nil && h != nil {
+					pinnedHandle = h
+				}
+			}
+		}
 		if pinnedHandle != nil {
 			if pinner, ok := p.(PinnableMessage); ok {
 				pinner.Unpin(e.ctx, pinnedHandle)
@@ -1942,6 +1971,123 @@ func (e *Engine) handleQueueResponse(p Platform, msg *Message, content string) b
 	}
 
 	return true
+}
+
+// handleQueueResponseStateless handles queue callbacks when no in-memory
+// interactiveState exists. This happens when the agent crashed or the session
+// was cleaned up but the pinned queue message survived.
+// It discovers the pin via FindQueuePin and handles clear/skip/yes directly.
+func (e *Engine) handleQueueResponseStateless(p Platform, msg *Message, action string) bool {
+	reader, hasReader := p.(QueuePinReader)
+	if !hasReader {
+		return false
+	}
+
+	content, handle, err := reader.FindQueuePin(e.ctx, msg.ReplyCtx)
+	if err != nil || content == "" {
+		return false
+	}
+
+	items := parseQueuePin(content)
+	if len(items) == 0 && action != "clear" {
+		return false
+	}
+
+	switch action {
+	case "clear":
+		if handle != nil {
+			if pinner, ok := p.(PinnableMessage); ok {
+				pinner.Unpin(e.ctx, handle)
+			}
+		}
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgQueueCleared))
+
+	case "skip":
+		remaining := items[1:]
+		preview := truncateStr(items[0], 60)
+		e.send(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgQueueSkipped), preview))
+
+		// Create or reuse state for queue continuation (workspace-aware)
+		interactiveKey := e.interactiveKeyForSessionKey(msg.SessionKey)
+		state := e.ensureStatelessQueueState(p, msg, interactiveKey, handle, remaining)
+		e.writeQueuePin(state, p, msg.ReplyCtx, remaining)
+		go e.processNextInQueue(interactiveKey)
+
+	case "yes":
+		if len(items) == 0 {
+			return true
+		}
+		remaining := items[1:]
+		itemContent := strings.ReplaceAll(items[0], queueItemSep, "\n")
+
+		// Resolve workspace-aware agent, sessions, and interactive key
+		agent, sessions := e.sessionContextForKey(msg.SessionKey)
+		interactiveKey := e.interactiveKeyForSessionKey(msg.SessionKey)
+		workspaceDir := ""
+		if interactiveKey != msg.SessionKey {
+			// Extract workspace dir from the key prefix
+			workspaceDir = strings.TrimSuffix(interactiveKey, ":"+msg.SessionKey)
+		}
+
+		// Create or reuse state for queue management
+		state := e.ensureStatelessQueueState(p, msg, interactiveKey, handle, remaining)
+
+		// Update pin with remaining items first
+		e.writeQueuePin(state, p, msg.ReplyCtx, remaining)
+
+		// Try to lock the session for processing (mirror stateful path)
+		session := sessions.GetOrCreateActive(msg.SessionKey)
+		if !session.TryLock() {
+			// Session got busy — re-add item to front of queue
+			restored := append([]string{items[0]}, remaining...)
+			e.writeQueuePin(state, p, msg.ReplyCtx, restored)
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPreviousProcessing))
+			return true
+		}
+
+		queuedMsg := &Message{
+			SessionKey: msg.SessionKey,
+			Content:    itemContent,
+			ReplyCtx:   msg.ReplyCtx,
+			Platform:   msg.Platform,
+			UserID:     msg.UserID,
+			UserName:   msg.UserName,
+		}
+
+		slog.Info("stateless: processing queued message",
+			"session", interactiveKey, "user", msg.UserName)
+		go e.processInteractiveMessageWith(p, queuedMsg, session, agent, interactiveKey, workspaceDir)
+
+	default:
+		return false
+	}
+
+	return true
+}
+
+// ensureStatelessQueueState ensures an interactiveState exists under the given
+// interactiveKey. Used by handleQueueResponseStateless to create state needed
+// for writeQueuePin and processNextInQueue. Workspace-aware: the caller must
+// pass the correct interactiveKey (potentially workspace-prefixed).
+func (e *Engine) ensureStatelessQueueState(p Platform, msg *Message, interactiveKey string, handle any, items []string) *interactiveState {
+	agent, sessions := e.sessionContextForKey(msg.SessionKey)
+
+	e.interactiveMu.Lock()
+	state, ok := e.interactiveStates[interactiveKey]
+	if !ok {
+		state = &interactiveState{platform: p, replyCtx: msg.ReplyCtx}
+		e.interactiveStates[interactiveKey] = state
+	}
+	e.interactiveMu.Unlock()
+
+	state.mu.Lock()
+	state.queue.pinnedHandle = handle
+	state.queue.cachedContent = formatQueuePin(items)
+	state.queue.agent = agent
+	state.queue.sessions = sessions
+	state.mu.Unlock()
+
+	return state
 }
 
 // findQueueInteractiveKey finds the interactiveKey for a given sessionKey that has a queue.
@@ -7806,7 +7952,51 @@ func shortenAbsPath(absPath, workDirSlash string) string {
 			return relative
 		}
 	}
+	// Replace $HOME with ~ for shorter display
+	if home := os.Getenv("HOME"); home != "" {
+		homeSlash := strings.TrimRight(home, "/") + "/"
+		if strings.HasPrefix(absPath, homeSlash) {
+			return "~/" + absPath[len(homeSlash):]
+		}
+	}
+	// macOS: /private/tmp → /tmp
+	if strings.HasPrefix(absPath, "/private/tmp/") {
+		absPath = absPath[len("/private"):]
+	}
+	// Compact internal segments: UUIDs and dash-encoded project paths
+	absPath = compactPathSegments(absPath)
 	return absPath
+}
+
+// uuidPattern matches a full UUID (8-4-4-4-12 hex).
+var uuidPattern = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+
+// compactPathSegments shortens noisy path segments:
+//   - UUIDs: 90ebbb1d-3183-424b-bed8-91c39dd50fea → 90e…fea
+//   - Dash-encoded absolute paths: -Users-semenovi-Work-cc-connect → <cc-connect>
+func compactPathSegments(p string) string {
+	// Shorten UUIDs
+	p = uuidPattern.ReplaceAllStringFunc(p, func(u string) string {
+		return u[:3] + "…" + u[len(u)-3:]
+	})
+
+	// Shorten dash-encoded absolute paths (e.g. -Users-foo-Work-proj → <proj>)
+	// These appear in Claude Code temp dirs as slug versions of /Users/foo/Work/proj
+	parts := strings.Split(p, "/")
+	for i, seg := range parts {
+		if len(seg) > 20 && strings.HasPrefix(seg, "-") && strings.Count(seg, "-") >= 3 {
+			// Looks like a dash-encoded path; take the last segment as label
+			dashes := strings.Split(seg, "-")
+			label := dashes[len(dashes)-1]
+			if label == "" && len(dashes) >= 2 {
+				label = dashes[len(dashes)-2]
+			}
+			if label != "" {
+				parts[i] = "<" + label + ">"
+			}
+		}
+	}
+	return strings.Join(parts, "/")
 }
 
 // shortenShellCommand shortens the leading binary in a shell command.
