@@ -76,12 +76,18 @@ func MarkdownToSimpleHTML(md string) string {
 			return
 		}
 
+		// Strip markdown formatting from header cells — headers are
+		// visually distinguished by the separator line, not by bold.
+		for c := range rows[0] {
+			rows[0][c] = stripMarkdownFormatting(rows[0][c])
+		}
+
 		// Determine column count from first row.
 		nCols := len(rows[0])
 
-		// Check if any cell has markdown formatting.
+		// Check if any DATA cell (not header) has markdown formatting.
 		hasFormatting := false
-		for _, row := range rows {
+		for _, row := range rows[1:] {
 			for _, cell := range row {
 				if hasMarkdownFormatting(cell) {
 					hasFormatting = true

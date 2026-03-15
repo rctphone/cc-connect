@@ -407,28 +407,34 @@ func TestMarkdownToSimpleHTML_TableAligned(t *testing.T) {
 	}
 }
 
-func TestMarkdownToSimpleHTML_TableWithFormatting(t *testing.T) {
-	md := "| **Header** | `code` |\n|---|---|\n| *italic* | normal |"
+func TestMarkdownToSimpleHTML_TableWithFormattingInData(t *testing.T) {
+	// Formatting in DATA cells → inline rendering (Branch C).
+	md := "| Header | Code |\n|---|---|\n| *italic* | `value` |"
 	out := MarkdownToSimpleHTML(md)
-	// Should NOT use <pre> when cells have formatting.
 	if strings.Contains(out, "<pre>") {
-		t.Errorf("expected no <pre> for table with formatting, got %q", out)
+		t.Errorf("expected no <pre> when data cells have formatting, got %q", out)
 	}
-	if !strings.Contains(out, "<b>Header</b>") {
-		t.Errorf("expected bold in table cell, got %q", out)
-	}
-	if !strings.Contains(out, "<code>code</code>") {
-		t.Errorf("expected code in table cell, got %q", out)
-	}
-	// Header row should be wrapped in bold.
-	if !strings.Contains(out, "<b>") {
-		t.Errorf("expected bold header row, got %q", out)
-	}
-	if !strings.Contains(out, "——————————") {
-		t.Errorf("expected separator line, got %q", out)
+	if !strings.Contains(out, "<code>value</code>") {
+		t.Errorf("expected code in data cell, got %q", out)
 	}
 	if err := validateHTMLNesting(out); err != nil {
 		t.Errorf("invalid HTML nesting: %v, got %q", err, out)
+	}
+}
+
+func TestMarkdownToSimpleHTML_TableWithBoldHeaders(t *testing.T) {
+	// Bold only in HEADERS → strip it and use <pre>.
+	md := "| **Name** | **Age** |\n|---|---|\n| Alice | 30 |\n| Bob | 25 |"
+	out := MarkdownToSimpleHTML(md)
+	if !strings.Contains(out, "<pre>") {
+		t.Errorf("bold headers should be stripped, table should use <pre>, got %q", out)
+	}
+	// Headers should appear without ** markers.
+	if !strings.Contains(out, "Name") {
+		t.Errorf("expected stripped header 'Name', got %q", out)
+	}
+	if strings.Contains(out, "**") {
+		t.Errorf("markdown markers should be stripped, got %q", out)
 	}
 }
 
