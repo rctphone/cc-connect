@@ -967,7 +967,14 @@ func (e *Engine) handleVoiceMessage(p Platform, msg *Message) {
 		"platform", msg.Platform, "user", msg.UserName,
 		"format", audio.Format, "size", len(audio.Data),
 	)
-	e.send(p, msg.ReplyCtx, e.i18n.T(MsgVoiceTranscribing))
+
+	// Send "transcribing" indicator; use trackable send so we can delete it on success
+	var transcribingHandle any
+	if tracker, ok := p.(CompactToolTracker); ok {
+		transcribingHandle, _ = tracker.SendTrackable(e.ctx, msg.ReplyCtx, e.i18n.T(MsgVoiceTranscribing))
+	} else {
+		e.send(p, msg.ReplyCtx, e.i18n.T(MsgVoiceTranscribing))
+	}
 
 	text, err := TranscribeAudio(e.ctx, e.speech.STT, audio, e.speech.Language)
 	if err != nil {
@@ -980,6 +987,13 @@ func (e *Engine) handleVoiceMessage(p Platform, msg *Message) {
 	if text == "" {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgVoiceEmpty))
 		return
+	}
+
+	// Delete the "transcribing" message now that we have the result
+	if transcribingHandle != nil {
+		if tracker, ok := p.(CompactToolTracker); ok {
+			tracker.DeleteMessages(e.ctx, msg.ReplyCtx, []any{transcribingHandle})
+		}
 	}
 
 	slog.Info("voice transcribed", "text_len", len(text))
