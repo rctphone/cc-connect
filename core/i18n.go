@@ -1288,11 +1288,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "🎙 Transcribiendo mensaje de voz...",
 	},
 	MsgVoiceTranscribed: {
-		LangEnglish:            "🎙 [Voice] %s",
-		LangChinese:            "🎙 [语音] %s",
-		LangTraditionalChinese: "🎙 [語音] %s",
-		LangJapanese:           "🎙 [音声] %s",
-		LangSpanish:            "🎙 [Voz] %s",
+		LangEnglish:            "🎙 %s",
+		LangChinese:            "🎙 %s",
+		LangTraditionalChinese: "🎙 %s",
+		LangJapanese:           "🎙 %s",
+		LangSpanish:            "🎙 %s",
 	},
 	MsgVoiceTranscribeFailed: {
 		LangEnglish:            "🎙 Voice transcription failed: %v",
