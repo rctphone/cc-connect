@@ -213,7 +213,7 @@ func NewGeminiSTT(apiKey, baseURL, model string) *GeminiSTT {
 		baseURL = "https://generativelanguage.googleapis.com"
 	}
 	if model == "" {
-		model = "gemini-2.0-flash"
+		model = "gemini-2.5-flash"
 	}
 	return &GeminiSTT{
 		APIKey:  apiKey,

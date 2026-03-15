@@ -184,7 +184,7 @@ level = "info" # debug, info, warn, error
 # # 备选：Gemini（Google 多模态 API）
 # [speech.gemini]
 # api_key = "AIza..."
-# model = "gemini-2.0-flash"
+# model = "gemini-2.5-flash"
 
 # =============================================================================
 # Text-to-Speech (Voice Reply) / 文字转语音（语音回复）
