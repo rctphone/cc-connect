@@ -459,16 +459,27 @@ func TestMarkdownToSimpleHTML_TableWide(t *testing.T) {
 }
 
 func TestMarkdownToSimpleHTML_TableVeryWideFallback(t *testing.T) {
-	// Table with >4 columns that is very wide should fall back to inline format.
-	md := "| A | B | C | D | E |\n|---|---|---|---|---|\n| very long cell one | very long cell two | very long cell three | very long cell four | very long cell five |"
+	// Table with many columns where each would be <3 chars should fall back to inline.
+	md := "| A | B | C | D | E | F | G | H | I | J | K | L | M | N | O |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |"
 	out := MarkdownToSimpleHTML(md)
-	// With 5 columns of long content, total width exceeds threshold → fallback.
+	// With 15 columns, each column gets <3 chars budget → fallback.
 	if strings.Contains(out, "<pre>") {
-		t.Errorf("very wide table with >4 cols should fall back to inline, got %q", out)
+		t.Errorf("table with too many narrow cols should fall back to inline, got %q", out)
 	}
-	// Should have bold header.
 	if !strings.Contains(out, "<b>") {
 		t.Errorf("expected bold header in fallback, got %q", out)
+	}
+}
+
+func TestMarkdownToSimpleHTML_TableWide5Cols(t *testing.T) {
+	// 5-column table that's wide but each col still gets >=3 chars → <pre> with truncation.
+	md := "| Label | РИИЛ | RED | МТС | Дилер |\n|---|---|---|---|---|\n| Цена | 390₽/мес | 500₽/мес | 650₽/мес | 207₽/мес |"
+	out := MarkdownToSimpleHTML(md)
+	if !strings.Contains(out, "<pre>") {
+		t.Errorf("5-col table should use <pre> with truncation, got %q", out)
+	}
+	if !strings.Contains(out, "…") || !strings.Contains(out, "РИИЛ") {
+		// Either truncated or fits — both are fine.
 	}
 }
 

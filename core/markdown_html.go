@@ -108,14 +108,23 @@ func MarkdownToSimpleHTML(md string) string {
 			}
 			totalWidth += (nCols - 1) * 3
 
-			if totalWidth > maxPreTableWidth && nCols > 4 {
-				// Too wide with many columns — fall back to Branch C.
-				renderTableInline(&b, rows)
-			} else {
-				if totalWidth > maxPreTableWidth {
-					// Shrink columns to fit within budget.
-					shrinkColumns(colWidths, nCols, maxPreTableWidth)
+			if totalWidth > maxPreTableWidth {
+				// Shrink columns to fit within budget.
+				shrinkColumns(colWidths, nCols, maxPreTableWidth)
+				// If any column is too narrow (<3 chars), fall back to inline.
+				tooNarrow := false
+				for _, w := range colWidths {
+					if w < 3 {
+						tooNarrow = true
+						break
+					}
 				}
+				if tooNarrow {
+					renderTableInline(&b, rows)
+				} else {
+					renderTablePre(&b, rows, colWidths)
+				}
+			} else {
 				renderTablePre(&b, rows, colWidths)
 			}
 		} else {
