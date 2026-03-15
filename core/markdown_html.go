@@ -7,8 +7,8 @@ import (
 
 // maxPreTableWidth is the maximum display width (in monospace characters) for
 // tables rendered inside <pre> blocks. Wider tables are truncated or fall back
-// to inline-formatted text. 34 measured on iPhone 14/15 in Telegram <pre>.
-const maxPreTableWidth = 34
+// to inline-formatted text. 38 measured on iPhone 14/15 in Telegram <pre>.
+const maxPreTableWidth = 38
 
 // minColWidthForPre is the minimum display width per column in a <pre> table.
 // If shrinking columns to fit maxPreTableWidth would make any column narrower
