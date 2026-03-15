@@ -3677,3 +3677,79 @@ func TestTopicWorkDir_CommandContextResolvesCorrectWorkspace(t *testing.T) {
 		t.Fatal("private chat: expected global sessions")
 	}
 }
+
+func TestTopicWorkDir_TwoDifferentChatsIsolated(t *testing.T) {
+	// Two different group chats (not topics), each with their own work_dir.
+	// Simulates: chat "delumo" → landing project, chat "raissa" → main project.
+	dirDelumo := t.TempDir()
+	dirRaissa := t.TempDir()
+
+	p := &stubTopicWorkDirPlatform{
+		stubPlatformEngine: stubPlatformEngine{n: "telegram"},
+		workdirs: map[string]string{
+			"telegram:-200001": dirDelumo, // chat delumo (no topic → topicID=0)
+			"telegram:-200002": dirRaissa, // chat raissa
+		},
+	}
+
+	globalAgent := &stubListAgent{
+		sessions: []AgentSessionInfo{
+			{ID: "global-1", Summary: "Global", MessageCount: 1, ModifiedAt: time.Now()},
+		},
+	}
+	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
+	e.workspacePool = newWorkspacePool(15 * time.Minute)
+
+	// Workspace for delumo
+	wsDelumo := e.workspacePool.GetOrCreate(dirDelumo)
+	wsDelumo.agent = &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "delumo-1", Summary: "Delumo Landing Page", MessageCount: 2, ModifiedAt: time.Now()},
+	}}
+	wsDelumo.sessions = NewSessionManager("")
+
+	// Workspace for raissa
+	wsRaissa := e.workspacePool.GetOrCreate(dirRaissa)
+	wsRaissa.agent = &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "raissa-1", Summary: "Raissa Main Project", MessageCount: 5, ModifiedAt: time.Now()},
+	}}
+	wsRaissa.sessions = NewSessionManager("")
+
+	// /list in delumo chat → only delumo sessions
+	p.sent = nil
+	e.cmdList(p, &Message{SessionKey: "telegram:-200001:456", ReplyCtx: "ctx"}, nil)
+	if len(p.sent) == 0 {
+		t.Fatal("delumo chat: expected /list output")
+	}
+	if !strings.Contains(p.sent[0], "Delumo Landing Page") {
+		t.Fatalf("delumo chat: expected own session, got: %q", p.sent[0])
+	}
+	if strings.Contains(p.sent[0], "Raissa Main Project") {
+		t.Fatalf("delumo chat: should NOT see raissa session, got: %q", p.sent[0])
+	}
+	if strings.Contains(p.sent[0], "Global") {
+		t.Fatalf("delumo chat: should NOT see global session, got: %q", p.sent[0])
+	}
+
+	// /list in raissa chat → only raissa sessions
+	p.sent = nil
+	e.cmdList(p, &Message{SessionKey: "telegram:-200002:456", ReplyCtx: "ctx"}, nil)
+	if len(p.sent) == 0 {
+		t.Fatal("raissa chat: expected /list output")
+	}
+	if !strings.Contains(p.sent[0], "Raissa Main Project") {
+		t.Fatalf("raissa chat: expected own session, got: %q", p.sent[0])
+	}
+	if strings.Contains(p.sent[0], "Delumo Landing Page") {
+		t.Fatalf("raissa chat: should NOT see delumo session, got: %q", p.sent[0])
+	}
+
+	// Verify commandContext returns different agents
+	agent1, _, _, _ := e.commandContext(p, &Message{SessionKey: "telegram:-200001:456"})
+	agent2, _, _, _ := e.commandContext(p, &Message{SessionKey: "telegram:-200002:456"})
+	if agent1 == agent2 {
+		t.Fatal("two different chats got same agent — should be isolated")
+	}
+	if agent1 == globalAgent || agent2 == globalAgent {
+		t.Fatal("chat agents should not be the global agent")
+	}
+}
