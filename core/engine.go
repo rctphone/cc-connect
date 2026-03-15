@@ -1205,7 +1205,9 @@ func (e *Engine) handleVoiceMessage(p Platform, msg *Message) {
 func (e *Engine) handlePendingPermission(p Platform, msg *Message, content string) bool {
 	e.interactiveMu.Lock()
 	state, ok := e.interactiveStates[msg.SessionKey]
-	if (!ok || state == nil) && e.multiWorkspace {
+	if !ok || state == nil {
+		// When using config workspaces or multi-workspace, the interactive state
+		// key is prefixed with the workspace path. Fall back to suffix matching.
 		suffix := ":" + msg.SessionKey
 		for key, s := range e.interactiveStates {
 			if strings.HasSuffix(key, suffix) {
