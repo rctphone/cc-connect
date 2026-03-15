@@ -330,3 +330,13 @@ type ChannelNameResolver interface {
 type TopicWorkDirResolver interface {
 	ResolveTopicWorkDir(sessionKey string) string
 }
+
+// CompactToolTracker is an optional interface for platforms that support
+// sending trackable messages that can be deleted later. Used by compact tool
+// display to clean up tool progress messages after a successful result.
+type CompactToolTracker interface {
+	// SendTrackable sends a message and returns a handle for later deletion.
+	SendTrackable(ctx context.Context, replyCtx any, content string) (handle any, err error)
+	// DeleteMessages deletes previously sent messages by their handles.
+	DeleteMessages(ctx context.Context, replyCtx any, handles []any)
+}

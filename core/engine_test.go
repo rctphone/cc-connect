@@ -2759,26 +2759,57 @@ func TestToolEmoji(t *testing.T) {
 
 func TestCompactToolInput(t *testing.T) {
 	tests := []struct {
-		name     string
-		tool     string
-		input    string
-		maxLen   int
-		want     string
+		name    string
+		tool    string
+		input   string
+		maxLen  int
+		workDir string
+		want    string
 	}{
-		{"empty input", "Bash", "", 120, ""},
-		{"simple command", "Bash", "ls -la", 120, "`ls -la`"},
-		{"multiline takes first", "Bash", "line1\nline2\nline3", 120, "`line1`"},
-		{"code block extraction", "Bash", "```bash\necho hello\n```", 120, "`echo hello`"},
-		{"truncation", "Read", "a very long file path that exceeds max", 10, "`a very lon…`"},
-		{"file path", "Read", "src/main.go", 120, "`src/main.go`"},
-		{"search pattern", "Grep", "error handling", 120, "`error handling`"},
+		{"empty input", "Bash", "", 120, "", ""},
+		{"simple command", "Bash", "ls -la", 120, "", "`ls -la`"},
+		{"multiline takes first", "Bash", "line1\nline2\nline3", 120, "", "`line1`"},
+		{"code block extraction", "Bash", "```bash\necho hello\n```", 120, "", "`echo hello`"},
+		{"truncation", "Read", "a very long file path that exceeds max", 10, "", "`a very lon…`"},
+		{"file path", "Read", "src/main.go", 120, "", "`src/main.go`"},
+		{"search pattern", "Grep", "error handling", 120, "", "`error handling`"},
+		{"strip workdir from path", "Read", "/home/user/project/src/main.go", 120, "/home/user/project", "`src/main.go`"},
+		{"sibling dir uses ../", "Read", "/home/user/other/lib.go", 120, "/home/user/project", "`../other/lib.go`"},
+		{"binary basename in shell", "Bash", "/usr/bin/python3 script.py", 120, "", "`python3 script.py`"},
+		{"binary basename with workdir", "Bash", "/usr/local/bin/ruff check /home/user/project/src", 120, "/home/user/project", "`ruff check src`"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := compactToolInput(tt.tool, tt.input, tt.maxLen)
+			got := compactToolInput(tt.tool, tt.input, tt.maxLen, tt.workDir)
 			if got != tt.want {
-				t.Errorf("compactToolInput(%q, %q, %d) = %q, want %q",
-					tt.tool, tt.input, tt.maxLen, got, tt.want)
+				t.Errorf("compactToolInput(%q, %q, %d, %q) = %q, want %q",
+					tt.tool, tt.input, tt.maxLen, tt.workDir, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestShortenPaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		workDir string
+		tool    string
+		want    string
+	}{
+		{"strip project prefix", "/home/user/project/src/main.go", "/home/user/project", "Read", "src/main.go"},
+		{"sibling dir", "/home/user/other/file.go", "/home/user/project", "Read", "../other/file.go"},
+		{"unrelated path unchanged", "/opt/lib/foo.so", "/home/user/project", "Read", "/opt/lib/foo.so"},
+		{"shell binary basename", "/usr/bin/python3 --version", "/home/user/project", "Bash", "python3 --version"},
+		{"empty workdir no-op", "/home/user/project/src/main.go", "", "Read", "/home/user/project/src/main.go"},
+		{"multiple paths", "cat /home/user/project/a.txt /home/user/project/b.txt", "/home/user/project", "Bash", "cat a.txt b.txt"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shortenPaths(tt.input, tt.workDir, tt.tool)
+			if got != tt.want {
+				t.Errorf("shortenPaths(%q, %q, %q) = %q, want %q",
+					tt.input, tt.workDir, tt.tool, got, tt.want)
 			}
 		})
 	}

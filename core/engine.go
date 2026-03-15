@@ -1506,9 +1506,26 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 	waitStart := time.Now()
 	firstEventLogged := false
 
+	// Compact tools: track sent tool messages for cleanup on success
+	var compactToolHandles []any
+	var compactTracker CompactToolTracker
+
 	state.mu.Lock()
 	sp := newStreamPreview(e.streamPreview, state.platform, state.replyCtx, e.ctx)
+	p := state.platform
+	replyCtxForTracker := state.replyCtx
+	if e.display.CompactTools {
+		compactTracker, _ = p.(CompactToolTracker)
+	}
 	state.mu.Unlock()
+
+	// Resolve workDir for path shortening in compact tool display
+	workDir := state.workspaceDir
+	if workDir == "" {
+		if wd, ok := e.agent.(interface{ GetWorkDir() string }); ok {
+			workDir = wd.GetWorkDir()
+		}
+	}
 
 	// Idle timeout: 0 = disabled
 	var idleTimer *time.Timer
@@ -1620,11 +1637,22 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				}
 				if e.display.CompactTools {
 					emoji := toolEmoji(event.ToolName)
-					summary := compactToolInput(event.ToolName, event.ToolInput, 120)
+					summary := compactToolInput(event.ToolName, event.ToolInput, 120, workDir)
+					var line string
 					if summary != "" {
-						e.send(p, replyCtx, emoji+" "+summary)
+						line = fmt.Sprintf("#%d %s %s", toolCount, emoji, summary)
 					} else {
-						e.send(p, replyCtx, emoji+" "+event.ToolName)
+						line = fmt.Sprintf("#%d %s %s", toolCount, emoji, event.ToolName)
+					}
+					// Use trackable send if available for later cleanup
+					if compactTracker != nil {
+						if handle, err := compactTracker.SendTrackable(e.ctx, replyCtx, line); err == nil {
+							compactToolHandles = append(compactToolHandles, handle)
+						} else {
+							e.send(p, replyCtx, line) // fallback
+						}
+					} else {
+						e.send(p, replyCtx, line)
 					}
 				} else {
 					toolInput := event.ToolInput
@@ -1803,6 +1831,11 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 
 			if elapsed := time.Since(replyStart); elapsed >= slowPlatformSend {
 				slog.Warn("slow final reply send", "platform", p.Name(), "elapsed", elapsed, "response_len", len(fullResponse))
+			}
+
+			// Clean up compact tool progress messages after successful completion
+			if compactTracker != nil && len(compactToolHandles) > 0 {
+				go compactTracker.DeleteMessages(e.ctx, replyCtxForTracker, compactToolHandles)
 			}
 
 			// TTS: async voice reply if enabled
@@ -7072,7 +7105,8 @@ func toolEmoji(toolName string) string {
 }
 
 // compactToolInput extracts a concise one-line summary from tool input.
-func compactToolInput(toolName, toolInput string, maxLen int) string {
+// workDir is used to shorten absolute paths by stripping the project prefix.
+func compactToolInput(toolName, toolInput string, maxLen int, workDir string) string {
 	if toolInput == "" {
 		return ""
 	}
@@ -7097,19 +7131,105 @@ func compactToolInput(toolName, toolInput string, maxLen int) string {
 	}
 	input = strings.TrimSpace(input)
 
+	// Shorten paths: strip work_dir prefix, use basename for binaries
+	input = shortenPaths(input, workDir, toolName)
+
 	// Truncate
 	runes := []rune(input)
 	if len(runes) > maxLen {
 		input = string(runes[:maxLen]) + "…"
 	}
 
-	// Format based on tool type
+	return "`" + input + "`"
+}
+
+// shortenPaths makes paths in tool input more compact:
+// - Strips the project work_dir prefix from absolute paths
+// - Uses ../ notation when shorter than the absolute path for sibling directories
+// - Strips directory from binary paths in shell commands (e.g. /usr/bin/python3 → python3)
+func shortenPaths(input, workDir, toolName string) string {
+	// For shell commands, always shorten the leading binary path
+	if isShellTool(toolName) {
+		input = shortenShellCommand(input)
+	}
+
+	if workDir == "" {
+		return input
+	}
+	// Normalize workDir to have trailing slash for prefix matching
+	wd := strings.TrimRight(workDir, "/") + "/"
+
+	// Replace absolute paths that match the workDir prefix
+	// Process word-by-word to find path-like tokens
+	var result strings.Builder
+	i := 0
+	for i < len(input) {
+		// Find next absolute path starting with /
+		if input[i] == '/' {
+			// Find end of path-like token (no spaces, no backticks)
+			end := i + 1
+			for end < len(input) && input[end] != ' ' && input[end] != '\t' &&
+				input[end] != '`' && input[end] != '"' && input[end] != '\'' &&
+				input[end] != ',' && input[end] != ';' && input[end] != ')' {
+				end++
+			}
+			absPath := input[i:end]
+			shortened := shortenAbsPath(absPath, wd)
+			result.WriteString(shortened)
+			i = end
+		} else {
+			result.WriteByte(input[i])
+			i++
+		}
+	}
+	return result.String()
+}
+
+// shortenAbsPath shortens an absolute path relative to the workDir.
+func shortenAbsPath(absPath, workDirSlash string) string {
+	// Direct prefix match: /home/user/project/src/main.go → src/main.go
+	if strings.HasPrefix(absPath, workDirSlash) {
+		return absPath[len(workDirSlash):]
+	}
+	// Check if ../ would be shorter (sibling directories)
+	workDirParent := filepath.Dir(strings.TrimRight(workDirSlash, "/")) + "/"
+	if strings.HasPrefix(absPath, workDirParent) {
+		relFromParent := absPath[len(workDirParent):]
+		relative := "../" + relFromParent
+		if len(relative) < len(absPath) {
+			return relative
+		}
+	}
+	return absPath
+}
+
+// shortenShellCommand shortens the leading binary in a shell command.
+// /usr/bin/python3 script.py → python3 script.py
+// /home/user/.local/bin/ruff check → ruff check
+func shortenShellCommand(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	if !strings.HasPrefix(cmd, "/") {
+		return cmd
+	}
+	// Find end of the binary path (first space)
+	spaceIdx := strings.IndexByte(cmd, ' ')
+	var binPath, rest string
+	if spaceIdx > 0 {
+		binPath = cmd[:spaceIdx]
+		rest = cmd[spaceIdx:]
+	} else {
+		binPath = cmd
+		rest = ""
+	}
+	return filepath.Base(binPath) + rest
+}
+
+func isShellTool(toolName string) bool {
 	switch toolName {
 	case "shell", "run_shell_command", "Bash":
-		return "`" + input + "`"
-	default:
-		return "`" + input + "`"
+		return true
 	}
+	return false
 }
 
 // truncateIf truncates s to maxLen runes. 0 means no truncation.

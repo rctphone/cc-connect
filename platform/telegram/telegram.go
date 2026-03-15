@@ -740,6 +740,41 @@ func (p *Platform) DeletePreviewMessage(ctx context.Context, previewHandle any) 
 	return err
 }
 
+// trackableMsgHandle stores info needed to delete a sent message later.
+type trackableMsgHandle struct {
+	chatID    int64
+	messageID int
+}
+
+// SendTrackable implements core.CompactToolTracker.
+// Sends a message and returns a handle that can be used to delete it later.
+func (p *Platform) SendTrackable(ctx context.Context, rctx any, content string) (any, error) {
+	rc, ok := rctx.(replyContext)
+	if !ok {
+		return nil, fmt.Errorf("telegram: invalid reply context type %T", rctx)
+	}
+	msgID, err := p.sendWithFallback(rc.chatID, content, 0, rc.messageThreadID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("telegram: sendTrackable: %w", err)
+	}
+	return &trackableMsgHandle{chatID: rc.chatID, messageID: msgID}, nil
+}
+
+// DeleteMessages implements core.CompactToolTracker.
+// Deletes previously sent messages by their handles.
+func (p *Platform) DeleteMessages(ctx context.Context, rctx any, handles []any) {
+	for _, h := range handles {
+		tm, ok := h.(*trackableMsgHandle)
+		if !ok {
+			continue
+		}
+		del := tgbotapi.NewDeleteMessage(tm.chatID, tm.messageID)
+		if _, err := p.bot.Request(del); err != nil {
+			slog.Debug("telegram: delete tracked message failed", "error", err, "msg_id", tm.messageID)
+		}
+	}
+}
+
 func (p *Platform) downloadFile(fileID string) ([]byte, error) {
 	fileConfig := tgbotapi.FileConfig{FileID: fileID}
 	file, err := p.bot.GetFile(fileConfig)
