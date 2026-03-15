@@ -361,6 +361,7 @@ func (e *Engine) SetConfigWorkspaces(entries []ConfigWorkspace) {
 		return len(sorted[i].ChannelKey) > len(sorted[j].ChannelKey)
 	})
 	e.configWorkspaces = sorted
+	e.multiWorkspace = true
 	if e.workspacePool == nil {
 		e.workspacePool = newWorkspacePool(15 * time.Minute)
 		go e.runIdleReaper()
@@ -1041,7 +1042,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	}
 
 	// Multi-workspace resolution (only if config workspace didn't match)
-	if resolvedWorkspace == "" && e.multiWorkspace {
+	if resolvedWorkspace == "" && e.multiWorkspace && e.workspaceBindings != nil {
 		channelID := extractChannelID(msg.SessionKey)
 		workspace, channelName, err := e.resolveWorkspace(p, channelID)
 		if err != nil {
@@ -1205,9 +1206,7 @@ func (e *Engine) handleVoiceMessage(p Platform, msg *Message) {
 func (e *Engine) handlePendingPermission(p Platform, msg *Message, content string) bool {
 	e.interactiveMu.Lock()
 	state, ok := e.interactiveStates[msg.SessionKey]
-	if !ok || state == nil {
-		// When using config workspaces or multi-workspace, the interactive state
-		// key is prefixed with the workspace path. Fall back to suffix matching.
+	if (!ok || state == nil) && e.multiWorkspace {
 		suffix := ":" + msg.SessionKey
 		for key, s := range e.interactiveStates {
 			if strings.HasSuffix(key, suffix) {
@@ -2881,7 +2880,7 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 	case "tts":
 		e.cmdTTS(p, msg, args)
 	case "workspace":
-		if !e.multiWorkspace {
+		if !e.multiWorkspace || e.workspaceBindings == nil {
 			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgWsNotEnabled))
 			return true
 		}
@@ -8554,7 +8553,7 @@ func (e *Engine) commandContext(p Platform, msg *Message) (Agent, *SessionManage
 		return wsAgent, wsSessions, cfgDir + ":" + msg.SessionKey, nil
 	}
 
-	if !e.multiWorkspace {
+	if !e.multiWorkspace || e.workspaceBindings == nil {
 		return e.agent, e.sessions, msg.SessionKey, nil
 	}
 	channelID := extractChannelID(msg.SessionKey)
@@ -8604,6 +8603,10 @@ func (e *Engine) sessionContextForKey(sessionKey string) (Agent, *SessionManager
 // interactiveKeyForSessionKey returns the interactive state key for a sessionKey.
 // In multi-workspace mode, it prefixes with the bound workspace path when available.
 func (e *Engine) interactiveKeyForSessionKey(sessionKey string) string {
+	// Config workspaces take priority.
+	if cfgDir := e.resolveConfigWorkspace(sessionKey); cfgDir != "" {
+		return cfgDir + ":" + sessionKey
+	}
 	if !e.multiWorkspace || e.workspaceBindings == nil {
 		return sessionKey
 	}
