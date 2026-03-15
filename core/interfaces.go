@@ -348,3 +348,9 @@ type PinnableMessage interface {
 	EditPinned(ctx context.Context, handle any, content string) error
 	Unpin(ctx context.Context, handle any) error
 }
+
+// QueuePinReader is an optional interface for platforms that can search for
+// a pinned queue message in a chat. Used to restore queues after bot restart.
+type QueuePinReader interface {
+	FindQueuePin(ctx context.Context, replyCtx any) (content string, handle any, err error)
+}

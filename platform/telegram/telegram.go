@@ -860,6 +860,43 @@ func (p *Platform) EditPinned(ctx context.Context, handle any, content string) e
 	return nil
 }
 
+// FindQueuePin implements core.QueuePinReader.
+// It uses getChat to find a pinned message with the queue marker prefix.
+func (p *Platform) FindQueuePin(ctx context.Context, rctx any) (string, any, error) {
+	rc, ok := rctx.(replyContext)
+	if !ok {
+		return "", nil, fmt.Errorf("telegram: invalid reply context type %T", rctx)
+	}
+
+	params := make(tgbotapi.Params)
+	params.AddNonZero64("chat_id", rc.chatID)
+	resp, err := p.bot.MakeRequest("getChat", params)
+	if err != nil {
+		return "", nil, fmt.Errorf("telegram: getChat: %w", err)
+	}
+
+	var chat struct {
+		PinnedMessage *struct {
+			MessageID int    `json:"message_id"`
+			Text      string `json:"text"`
+		} `json:"pinned_message"`
+	}
+	if err := json.Unmarshal(resp.Result, &chat); err != nil {
+		return "", nil, fmt.Errorf("telegram: parse getChat: %w", err)
+	}
+
+	if chat.PinnedMessage == nil || !strings.HasPrefix(chat.PinnedMessage.Text, core.QueuePinPrefix) {
+		return "", nil, nil
+	}
+
+	handle := &pinnedMsgHandle{
+		chatID:    rc.chatID,
+		messageID: chat.PinnedMessage.MessageID,
+		threadID:  rc.messageThreadID,
+	}
+	return chat.PinnedMessage.Text, handle, nil
+}
+
 // Unpin implements core.PinnableMessage.
 func (p *Platform) Unpin(ctx context.Context, handle any) error {
 	h, ok := handle.(*pinnedMsgHandle)

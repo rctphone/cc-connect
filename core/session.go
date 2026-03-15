@@ -255,6 +255,17 @@ func (sm *SessionManager) AllSessions() []*Session {
 	return out
 }
 
+// ActiveSessionKeys returns all user keys that currently have an active session.
+func (sm *SessionManager) ActiveSessionKeys() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	keys := make([]string, 0, len(sm.activeSession))
+	for k := range sm.activeSession {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // FindByID looks up a session by its internal ID across all users.
 func (sm *SessionManager) FindByID(id string) *Session {
 	sm.mu.RLock()

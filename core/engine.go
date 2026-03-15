@@ -192,25 +192,68 @@ type workspaceInitFlow struct {
 	channelName string
 }
 
-// queuedMessage represents a user message waiting in the queue while the agent is busy.
-type queuedMessage struct {
-	msg            *Message
-	agent          Agent
-	sessions       *SessionManager
-	interactiveKey string
-	workspaceDir   string
-	queuedAt       time.Time
-}
-
-// messageQueue holds buffered messages for a busy session.
+// messageQueue holds queue state for a busy session.
+// Queue data is persisted as a pinned message; in-memory fields are caches.
 type messageQueue struct {
-	items          []*queuedMessage
-	maxSize        int  // default 10
-	pinnedHandle   any  // handle from PinnableMessage.SendAndPin
-	confirmPending bool // waiting for user to confirm next queue item
+	maxSize        int    // default 10
+	pinnedHandle   any    // handle from PinnableMessage.SendAndPin (cache)
+	cachedContent  string // last-known pin text (cache, not source of truth)
+	confirmPending bool   // waiting for user to confirm next queue item
+	agent          Agent           // agent to use when processing queued items
+	sessions       *SessionManager // session manager for queued items
 }
 
 const defaultQueueMaxSize = 10
+
+// QueuePinPrefix is the marker line for bot queue pins.
+// It must be language-independent so FindQueuePin can locate it.
+const QueuePinPrefix = "📋 cc-connect:queue"
+
+// queueItemSep replaces newlines inside a single queue item when serialised to the pin.
+const queueItemSep = " ▏ "
+
+// maxPinLength is the Telegram message length limit.
+const maxPinLength = 4096
+
+// formatQueuePin serialises a list of queue items into the pinned message text.
+func formatQueuePin(items []string) string {
+	var sb strings.Builder
+	sb.WriteString(QueuePinPrefix)
+	sb.WriteString("\n")
+	for i, item := range items {
+		escaped := strings.ReplaceAll(item, "\n", queueItemSep)
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, escaped))
+	}
+	return sb.String()
+}
+
+// parseQueuePin parses a pinned message text back into queue items.
+func parseQueuePin(content string) []string {
+	if !isQueuePin(content) {
+		return nil
+	}
+	lines := strings.Split(content, "\n")
+	var items []string
+	for _, line := range lines[1:] { // skip header
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Strip "N. " prefix
+		idx := strings.Index(line, ". ")
+		if idx > 0 {
+			item := line[idx+2:]
+			item = strings.ReplaceAll(item, queueItemSep, "\n")
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+// isQueuePin checks whether a message starts with the queue pin marker.
+func isQueuePin(content string) bool {
+	return strings.HasPrefix(content, QueuePinPrefix)
+}
 
 // interactiveState tracks a running interactive agent session and its permission state.
 type interactiveState struct {
@@ -750,6 +793,10 @@ func (e *Engine) Start() error {
 	if len(startErrs) == len(e.platforms) && len(e.platforms) > 0 {
 		return startErrs[0] // Return first error
 	}
+
+	// Discover pinned queue messages from a previous run
+	go e.resumeQueuedMessages()
+
 	return nil
 }
 
@@ -971,7 +1018,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	e.interactiveMu.Unlock()
 	if hasState && queueState != nil {
 		queueState.mu.Lock()
-		hasQueue := len(queueState.queue.items) > 0
+		hasQueue := queueState.queue.cachedContent != ""
 		queueState.mu.Unlock()
 		if hasQueue {
 			session.Unlock()
@@ -1533,23 +1580,14 @@ func (e *Engine) cleanupInteractiveState(sessionKey string, expected ...*interac
 	delete(e.interactiveStates, sessionKey)
 	e.interactiveMu.Unlock()
 
-	// Clean up queue pinned message if any
+	// Do NOT unpin the queue message — it is persistent storage.
+	// The pin survives agent crashes/restarts and will be rediscovered
+	// by resumeQueuedMessages. Only explicit user actions (queue:clear,
+	// /stop) should remove the pin.
 	if ok && state != nil {
 		state.mu.Lock()
-		pinnedHandle := state.queue.pinnedHandle
-		p := state.platform
-		state.queue.items = nil
-		state.queue.pinnedHandle = nil
 		state.queue.confirmPending = false
 		state.mu.Unlock()
-
-		if pinnedHandle != nil {
-			if pinner, ok := p.(PinnableMessage); ok {
-				if err := pinner.Unpin(e.ctx, pinnedHandle); err != nil {
-					slog.Debug("cleanupInteractiveState: unpin failed", "error", err)
-				}
-			}
-		}
 	}
 
 	if ok && state != nil && state.agentSession != nil {
@@ -1577,6 +1615,103 @@ func (e *Engine) cleanupInteractiveState(sessionKey string, expected ...*interac
 // Message queue
 // ──────────────────────────────────────────────────────────────
 
+// readQueueItems reads queue items from cache or by discovering the pin via FindQueuePin.
+func (e *Engine) readQueueItems(state *interactiveState) []string {
+	state.mu.Lock()
+	content := state.queue.cachedContent
+	p := state.platform
+	replyCtx := state.replyCtx
+	state.mu.Unlock()
+
+	if content != "" {
+		return parseQueuePin(content)
+	}
+
+	// Try FindQueuePin if platform supports it
+	if reader, ok := p.(QueuePinReader); ok {
+		content, handle, err := reader.FindQueuePin(e.ctx, replyCtx)
+		if err == nil && content != "" {
+			state.mu.Lock()
+			state.queue.cachedContent = content
+			state.queue.pinnedHandle = handle
+			state.mu.Unlock()
+			return parseQueuePin(content)
+		}
+	}
+
+	return nil
+}
+
+// writeQueuePin writes queue items to the pinned message (or unpins if empty).
+func (e *Engine) writeQueuePin(state *interactiveState, p Platform, replyCtx any, items []string) {
+	state.mu.Lock()
+	pinnedHandle := state.queue.pinnedHandle
+	state.mu.Unlock()
+
+	if len(items) == 0 {
+		// Queue empty — unpin if needed
+		if pinnedHandle != nil {
+			if pinner, ok := p.(PinnableMessage); ok {
+				pinner.Unpin(e.ctx, pinnedHandle)
+			}
+		}
+		state.mu.Lock()
+		state.queue.pinnedHandle = nil
+		state.queue.cachedContent = ""
+		state.mu.Unlock()
+		return
+	}
+
+	text := formatQueuePin(items)
+
+	pinner, canPin := p.(PinnableMessage)
+
+	slog.Info("writeQueuePin", "items", len(items), "has_pinned", pinnedHandle != nil, "can_pin", canPin)
+
+	if pinnedHandle != nil && canPin {
+		if err := pinner.EditPinned(e.ctx, pinnedHandle, text); err != nil {
+			slog.Warn("writeQueuePin: edit failed, recreating", "error", err)
+			// Delete old and recreate (handles 48h edit limit)
+			pinner.Unpin(e.ctx, pinnedHandle)
+			handle, err2 := pinner.SendAndPin(e.ctx, replyCtx, text)
+			if err2 != nil {
+				slog.Error("writeQueuePin: recreate failed", "error", err2)
+				e.send(p, replyCtx, text)
+				state.mu.Lock()
+				state.queue.pinnedHandle = nil
+				state.queue.cachedContent = text
+				state.mu.Unlock()
+				return
+			}
+			state.mu.Lock()
+			state.queue.pinnedHandle = handle
+			state.queue.cachedContent = text
+			state.mu.Unlock()
+		} else {
+			state.mu.Lock()
+			state.queue.cachedContent = text
+			state.mu.Unlock()
+		}
+	} else if canPin {
+		handle, err := pinner.SendAndPin(e.ctx, replyCtx, text)
+		state.mu.Lock()
+		if err != nil {
+			slog.Debug("writeQueuePin: send and pin failed", "error", err)
+			e.send(p, replyCtx, text)
+		} else {
+			state.queue.pinnedHandle = handle
+		}
+		state.queue.cachedContent = text
+		state.mu.Unlock()
+	} else {
+		// Platform doesn't support pinning — just send
+		e.send(p, replyCtx, text)
+		state.mu.Lock()
+		state.queue.cachedContent = text
+		state.mu.Unlock()
+	}
+}
+
 // enqueueMessage adds a message to the queue for later processing.
 // Called when TryLock fails (agent is busy).
 func (e *Engine) enqueueMessage(p Platform, msg *Message, agent Agent, sessions *SessionManager, interactiveKey string, workspaceDir string) {
@@ -1590,87 +1725,40 @@ func (e *Engine) enqueueMessage(p Platform, msg *Message, agent Agent, sessions 
 		return
 	}
 
+	// Read current queue from cache (or discover from pin)
+	items := e.readQueueItems(state)
+
 	state.mu.Lock()
 	maxSize := state.queue.maxSize
 	if maxSize == 0 {
 		maxSize = defaultQueueMaxSize
 	}
-	if len(state.queue.items) >= maxSize {
+	if len(items) >= maxSize {
 		state.mu.Unlock()
 		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgQueueFull), maxSize))
 		return
 	}
-
-	state.queue.items = append(state.queue.items, &queuedMessage{
-		msg:            msg,
-		agent:          agent,
-		sessions:       sessions,
-		interactiveKey: interactiveKey,
-		workspaceDir:   workspaceDir,
-		queuedAt:       time.Now(),
-	})
-	queueLen := len(state.queue.items)
+	// Store agent/sessions context for later processing
+	if state.queue.agent == nil {
+		state.queue.agent = agent
+	}
+	if state.queue.sessions == nil {
+		state.queue.sessions = sessions
+	}
 	state.mu.Unlock()
 
-	slog.Info("message enqueued", "session", interactiveKey, "queue_len", queueLen, "user", msg.UserName)
-	e.updateQueueDisplay(state, p, msg.ReplyCtx)
-}
+	// Append the new message (escape newlines)
+	items = append(items, msg.Content)
 
-// updateQueueDisplay creates or updates the pinned queue message.
-func (e *Engine) updateQueueDisplay(state *interactiveState, p Platform, replyCtx any) {
-	state.mu.Lock()
-	items := make([]*queuedMessage, len(state.queue.items))
-	copy(items, state.queue.items)
-	pinnedHandle := state.queue.pinnedHandle
-	state.mu.Unlock()
-
-	if len(items) == 0 {
-		// Queue empty — unpin if needed
-		if pinnedHandle != nil {
-			if pinner, ok := p.(PinnableMessage); ok {
-				pinner.Unpin(e.ctx, pinnedHandle)
-			}
-			state.mu.Lock()
-			state.queue.pinnedHandle = nil
-			state.mu.Unlock()
-		}
+	// Check pin length limit
+	text := formatQueuePin(items)
+	if len(text) > maxPinLength {
+		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgQueueFull), maxSize))
 		return
 	}
 
-	// Build queue text
-	var sb strings.Builder
-	sb.WriteString(e.i18n.T(MsgQueueTitle))
-	sb.WriteString("\n")
-	for i, item := range items {
-		preview := truncateStr(item.msg.Content, 60)
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, preview))
-	}
-
-	text := sb.String()
-
-	pinner, canPin := p.(PinnableMessage)
-
-	slog.Info("updateQueueDisplay", "items", len(items), "has_pinned", pinnedHandle != nil, "can_pin", canPin)
-
-	if pinnedHandle != nil && canPin {
-		if err := pinner.EditPinned(e.ctx, pinnedHandle, text); err != nil {
-			slog.Warn("updateQueueDisplay: edit pinned failed", "error", err, "items", len(items))
-		}
-	} else if canPin {
-		handle, err := pinner.SendAndPin(e.ctx, replyCtx, text)
-		if err != nil {
-			slog.Debug("updateQueueDisplay: send and pin failed", "error", err)
-			// Fall back to regular send
-			e.send(p, replyCtx, text)
-		} else {
-			state.mu.Lock()
-			state.queue.pinnedHandle = handle
-			state.mu.Unlock()
-		}
-	} else {
-		// Platform doesn't support pinning — just send
-		e.send(p, replyCtx, text)
-	}
+	slog.Info("message enqueued", "session", interactiveKey, "queue_len", len(items), "user", msg.UserName)
+	e.writeQueuePin(state, p, msg.ReplyCtx, items)
 }
 
 // processNextInQueue checks the queue after the agent finishes and prompts the user.
@@ -1683,18 +1771,18 @@ func (e *Engine) processNextInQueue(interactiveKey string) {
 		return
 	}
 
-	state.mu.Lock()
-	if len(state.queue.items) == 0 {
-		state.mu.Unlock()
+	items := e.readQueueItems(state)
+	if len(items) == 0 {
 		return
 	}
-	next := state.queue.items[0]
+
+	state.mu.Lock()
 	state.queue.confirmPending = true
 	p := state.platform
 	replyCtx := state.replyCtx
 	state.mu.Unlock()
 
-	preview := truncateStr(next.msg.Content, 80)
+	preview := truncateStr(items[0], 80)
 	confirmText := fmt.Sprintf(e.i18n.T(MsgQueueConfirm), preview)
 
 	buttons := [][]ButtonOption{
@@ -1747,59 +1835,86 @@ func (e *Engine) handleQueueResponse(p Platform, msg *Message, content string) b
 
 	switch action {
 	case "yes":
-		if len(state.queue.items) == 0 {
+		// Read and parse queue items
+		items := parseQueuePin(state.queue.cachedContent)
+		if len(items) == 0 {
 			state.mu.Unlock()
-			return true
+			// Fallback: try discovering from pin
+			items = e.readQueueItems(state)
+			if len(items) == 0 {
+				return true
+			}
+		} else {
+			state.mu.Unlock()
 		}
-		queued := state.queue.items[0]
-		state.queue.items = state.queue.items[1:]
+
+		itemContent := items[0]
+		remaining := items[1:]
+
+		state.mu.Lock()
+		agent := state.queue.agent
+		sessions := state.queue.sessions
+		workspaceDir := state.workspaceDir
 		state.mu.Unlock()
 
-		// Update the queue display
-		e.updateQueueDisplay(state, p, msg.ReplyCtx)
+		if agent == nil {
+			agent = e.agent
+		}
+		if sessions == nil {
+			sessions = e.sessions
+		}
 
-		// Process the queued message
-		session := queued.sessions.GetOrCreateActive(queued.msg.SessionKey)
+		// Update pin with remaining items
+		e.writeQueuePin(state, p, msg.ReplyCtx, remaining)
+
+		// Restore newlines that were escaped for pin storage
+		queuedContent := strings.ReplaceAll(itemContent, queueItemSep, "\n")
+		queuedMsg := &Message{
+			SessionKey: msg.SessionKey,
+			Content:    queuedContent,
+			ReplyCtx:   msg.ReplyCtx,
+			Platform:   msg.Platform,
+			UserID:     msg.UserID,
+			UserName:   msg.UserName,
+		}
+
+		session := sessions.GetOrCreateActive(msg.SessionKey)
 		if !session.TryLock() {
-			// Session got busy again — re-enqueue at front
-			state.mu.Lock()
-			state.queue.items = append([]*queuedMessage{queued}, state.queue.items...)
-			state.mu.Unlock()
+			// Session got busy again — re-add to front of queue
+			e.writeQueuePin(state, p, msg.ReplyCtx, items) // restore original
 			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPreviousProcessing))
 			return true
 		}
 
 		slog.Info("processing queued message",
-			"session", queued.interactiveKey,
-			"user", queued.msg.UserName,
-			"queued_for", time.Since(queued.queuedAt),
+			"session", interactiveKey,
+			"user", msg.UserName,
 		)
 
-		// Update reply context on the queued message to use the latest one
-		queued.msg.ReplyCtx = msg.ReplyCtx
-
-		go e.processInteractiveMessageWith(p, queued.msg, session, queued.agent, queued.interactiveKey, queued.workspaceDir)
+		go e.processInteractiveMessageWith(p, queuedMsg, session, agent, interactiveKey, workspaceDir)
 
 	case "skip":
-		if len(state.queue.items) == 0 {
-			state.mu.Unlock()
-			return true
-		}
-		skipped := state.queue.items[0]
-		state.queue.items = state.queue.items[1:]
+		items := parseQueuePin(state.queue.cachedContent)
 		state.mu.Unlock()
 
-		preview := truncateStr(skipped.msg.Content, 60)
+		if len(items) == 0 {
+			return true
+		}
+
+		skippedContent := items[0]
+		remaining := items[1:]
+
+		preview := truncateStr(skippedContent, 60)
 		e.send(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgQueueSkipped), preview))
 
-		// Update queue display and prompt for next
-		e.updateQueueDisplay(state, p, msg.ReplyCtx)
+		// Update pin and prompt for next
+		e.writeQueuePin(state, p, msg.ReplyCtx, remaining)
 		go e.processNextInQueue(interactiveKey)
 
 	case "clear":
-		state.queue.items = nil
 		pinnedHandle := state.queue.pinnedHandle
 		state.queue.pinnedHandle = nil
+		state.queue.cachedContent = ""
 		state.mu.Unlock()
 
 		if pinnedHandle != nil {
@@ -1824,7 +1939,7 @@ func (e *Engine) findQueueInteractiveKey(sessionKey string) string {
 	// Direct match first
 	if state, ok := e.interactiveStates[sessionKey]; ok {
 		state.mu.Lock()
-		hasQueue := len(state.queue.items) > 0 || state.queue.confirmPending
+		hasQueue := state.queue.cachedContent != "" || state.queue.confirmPending
 		state.mu.Unlock()
 		if hasQueue {
 			return sessionKey
@@ -1835,7 +1950,7 @@ func (e *Engine) findQueueInteractiveKey(sessionKey string) string {
 	for key, state := range e.interactiveStates {
 		if strings.HasSuffix(key, ":"+sessionKey) {
 			state.mu.Lock()
-			hasQueue := len(state.queue.items) > 0 || state.queue.confirmPending
+			hasQueue := state.queue.cachedContent != "" || state.queue.confirmPending
 			state.mu.Unlock()
 			if hasQueue {
 				return key
@@ -1848,7 +1963,86 @@ func (e *Engine) findQueueInteractiveKey(sessionKey string) string {
 
 const defaultEventIdleTimeout = 2 * time.Hour
 
+// resumeQueuedMessages discovers pinned queue messages left from a previous
+// run and shows confirmation buttons so the user can process them.
+func (e *Engine) resumeQueuedMessages() {
+	time.Sleep(2 * time.Second) // let platforms stabilise
+
+	sessionKeys := e.sessions.ActiveSessionKeys()
+
+	for _, p := range e.platforms {
+		reader, ok := p.(QueuePinReader)
+		if !ok {
+			continue
+		}
+		reconstructor, ok := p.(ReplyContextReconstructor)
+		if !ok {
+			continue
+		}
+
+		prefix := p.Name() + ":"
+		seen := make(map[string]bool)
+
+		for _, key := range sessionKeys {
+			if !strings.HasPrefix(key, prefix) {
+				continue
+			}
+
+			rctx, err := reconstructor.ReconstructReplyCtx(key)
+			if err != nil {
+				continue
+			}
+
+			// Deduplicate by chat+topic so we don't check the same pin twice
+			chatKey := fmt.Sprintf("%v", rctx)
+			if seen[chatKey] {
+				continue
+			}
+			seen[chatKey] = true
+
+			content, handle, err := reader.FindQueuePin(e.ctx, rctx)
+			if err != nil || content == "" {
+				continue
+			}
+
+			items := parseQueuePin(content)
+			if len(items) == 0 {
+				continue
+			}
+
+			slog.Info("resumed queue from pin", "session_key", key, "items", len(items))
+
+			e.interactiveMu.Lock()
+			state, exists := e.interactiveStates[key]
+			if !exists {
+				state = &interactiveState{platform: p, replyCtx: rctx}
+				e.interactiveStates[key] = state
+			}
+			e.interactiveMu.Unlock()
+
+			state.mu.Lock()
+			state.queue.cachedContent = content
+			state.queue.pinnedHandle = handle
+			state.queue.agent = e.agent
+			state.queue.sessions = e.sessions
+			state.mu.Unlock()
+
+			go e.processNextInQueue(key)
+		}
+	}
+}
+
 func (e *Engine) processInteractiveEvents(state *interactiveState, session *Session, sessionKey string, msgID string, turnStart time.Time) {
+	// turnDone is set when the agent completes (EventResult or EventError).
+	// The deferred processNextInQueue guarantees the queue advances even if
+	// a p.Send error causes an early return inside the EventResult handler.
+	var turnDone bool
+	defer func() {
+		if turnDone {
+			go e.processNextInQueue(sessionKey)
+		}
+	}()
+
 	var textParts []string
 	var segmentStart int // index into textParts: text before this has been sent/displayed
 	toolCount := 0
@@ -2198,9 +2392,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				}
 			}
 
-			// Check message queue for pending items
-			go e.processNextInQueue(sessionKey)
-
+			turnDone = true
 			return
 
 		case EventError:
@@ -2209,6 +2401,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				slog.Error("agent error", "error", event.Error)
 				e.send(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), event.Error))
 			}
+			turnDone = true
 			return
 		}
 	}
@@ -5138,6 +5331,11 @@ func (e *Engine) executeCardAction(cmd, args, sessionKey string) {
 		pending := state.pending
 		quietMode := state.quiet
 		agentSession := state.agentSession
+		pinnedHandle := state.queue.pinnedHandle
+		statePlatform := state.platform
+		state.queue.pinnedHandle = nil
+		state.queue.cachedContent = ""
+		state.queue.confirmPending = false
 		if pending != nil {
 			state.pending = nil
 		}
@@ -5151,6 +5349,12 @@ func (e *Engine) executeCardAction(cmd, args, sessionKey string) {
 		e.interactiveMu.Unlock()
 		if pending != nil {
 			pending.resolve()
+		}
+		// Clean up queue pin on explicit /stop
+		if pinnedHandle != nil {
+			if pinner, ok := statePlatform.(PinnableMessage); ok {
+				pinner.Unpin(e.ctx, pinnedHandle)
+			}
 		}
 		if agentSession != nil {
 			slog.Debug("cleanupInteractiveState: closing agent session", "session", sessionKey)

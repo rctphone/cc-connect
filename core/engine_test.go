@@ -2849,6 +2849,41 @@ func (p *stubPinnablePlatform) Unpin(_ context.Context, _ any) error {
 	return nil
 }
 
+func TestFormatParseQueuePin(t *testing.T) {
+	items := []string{"hello world", "multi\nline\nmessage", "simple"}
+	text := formatQueuePin(items)
+
+	if !isQueuePin(text) {
+		t.Fatalf("expected isQueuePin to be true for %q", text)
+	}
+	if !strings.HasPrefix(text, QueuePinPrefix) {
+		t.Fatalf("expected prefix %q, got %q", QueuePinPrefix, text[:30])
+	}
+
+	parsed := parseQueuePin(text)
+	if len(parsed) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(parsed))
+	}
+	if parsed[0] != "hello world" {
+		t.Fatalf("expected 'hello world', got %q", parsed[0])
+	}
+	if parsed[1] != "multi\nline\nmessage" {
+		t.Fatalf("expected multiline restored, got %q", parsed[1])
+	}
+	if parsed[2] != "simple" {
+		t.Fatalf("expected 'simple', got %q", parsed[2])
+	}
+}
+
+func TestParseQueuePin_Empty(t *testing.T) {
+	if items := parseQueuePin(""); items != nil {
+		t.Fatalf("expected nil for empty, got %v", items)
+	}
+	if items := parseQueuePin("random text"); items != nil {
+		t.Fatalf("expected nil for non-queue text, got %v", items)
+	}
+}
+
 func TestEnqueueMessage_AddsToQueue(t *testing.T) {
 	e := newTestEngine()
 	p := &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
@@ -2870,11 +2905,11 @@ func TestEnqueueMessage_AddsToQueue(t *testing.T) {
 	e.interactiveMu.Unlock()
 
 	state.mu.Lock()
-	qLen := len(state.queue.items)
+	items := parseQueuePin(state.queue.cachedContent)
 	state.mu.Unlock()
 
-	if qLen != 1 {
-		t.Fatalf("expected 1 item in queue, got %d", qLen)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item in queue, got %d", len(items))
 	}
 
 	if p.pinnedContent == "" {
@@ -2887,16 +2922,13 @@ func TestEnqueueMessage_QueueFull(t *testing.T) {
 	p := &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
 	sessionKey := "test:user1"
 
-	// Create state with full queue
+	// Create state with full queue (2 items already in pin)
 	state := &interactiveState{
 		platform: p,
 		replyCtx: "ctx",
 	}
 	state.queue.maxSize = 2
-	state.queue.items = []*queuedMessage{
-		{msg: &Message{Content: "msg1"}, queuedAt: time.Now()},
-		{msg: &Message{Content: "msg2"}, queuedAt: time.Now()},
-	}
+	state.queue.cachedContent = formatQueuePin([]string{"msg1", "msg2"})
 
 	e.interactiveMu.Lock()
 	e.interactiveStates[sessionKey] = state
@@ -2922,28 +2954,20 @@ func TestHandleQueueResponse_Yes(t *testing.T) {
 	p := &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
 	sessionKey := "test:user1"
 
-	queuedMsg := &Message{SessionKey: sessionKey, Content: "queued message", ReplyCtx: "ctx", UserName: "user1"}
-
 	state := &interactiveState{
 		platform: p,
 		replyCtx: "ctx",
 	}
 	state.queue.confirmPending = true
-	state.queue.items = []*queuedMessage{
-		{
-			msg:            queuedMsg,
-			agent:          e.agent,
-			sessions:       e.sessions,
-			interactiveKey: sessionKey,
-			queuedAt:       time.Now(),
-		},
-	}
+	state.queue.cachedContent = formatQueuePin([]string{"queued message"})
+	state.queue.agent = e.agent
+	state.queue.sessions = e.sessions
 
 	e.interactiveMu.Lock()
 	e.interactiveStates[sessionKey] = state
 	e.interactiveMu.Unlock()
 
-	msg := &Message{SessionKey: sessionKey, Content: "queue:yes", ReplyCtx: "ctx"}
+	msg := &Message{SessionKey: sessionKey, Content: "queue:yes", ReplyCtx: "ctx", UserName: "user1"}
 	handled := e.handleQueueResponse(p, msg, "queue:yes")
 
 	if !handled {
@@ -2954,11 +2978,11 @@ func TestHandleQueueResponse_Yes(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	state.mu.Lock()
-	remaining := len(state.queue.items)
+	remaining := parseQueuePin(state.queue.cachedContent)
 	state.mu.Unlock()
 
-	if remaining != 0 {
-		t.Fatalf("expected 0 items in queue after yes, got %d", remaining)
+	if len(remaining) != 0 {
+		t.Fatalf("expected 0 items in queue after yes, got %d", len(remaining))
 	}
 }
 
@@ -2972,10 +2996,7 @@ func TestHandleQueueResponse_Skip(t *testing.T) {
 		replyCtx: "ctx",
 	}
 	state.queue.confirmPending = true
-	state.queue.items = []*queuedMessage{
-		{msg: &Message{Content: "first"}, queuedAt: time.Now()},
-		{msg: &Message{Content: "second"}, queuedAt: time.Now()},
-	}
+	state.queue.cachedContent = formatQueuePin([]string{"first", "second"})
 
 	e.interactiveMu.Lock()
 	e.interactiveStates[sessionKey] = state
@@ -3003,11 +3024,11 @@ func TestHandleQueueResponse_Skip(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	state.mu.Lock()
-	remaining := len(state.queue.items)
+	remaining := parseQueuePin(state.queue.cachedContent)
 	state.mu.Unlock()
 
-	if remaining != 1 {
-		t.Fatalf("expected 1 item remaining in queue after skip, got %d", remaining)
+	if len(remaining) != 1 {
+		t.Fatalf("expected 1 item remaining in queue after skip, got %d", len(remaining))
 	}
 }
 
@@ -3022,10 +3043,7 @@ func TestHandleQueueResponse_Clear(t *testing.T) {
 	}
 	state.queue.confirmPending = true
 	state.queue.pinnedHandle = "pinned-1"
-	state.queue.items = []*queuedMessage{
-		{msg: &Message{Content: "first"}, queuedAt: time.Now()},
-		{msg: &Message{Content: "second"}, queuedAt: time.Now()},
-	}
+	state.queue.cachedContent = formatQueuePin([]string{"first", "second"})
 
 	e.interactiveMu.Lock()
 	e.interactiveStates[sessionKey] = state
@@ -3039,12 +3057,12 @@ func TestHandleQueueResponse_Clear(t *testing.T) {
 	}
 
 	state.mu.Lock()
-	remaining := len(state.queue.items)
+	hasCachedContent := state.queue.cachedContent != ""
 	hasPinned := state.queue.pinnedHandle != nil
 	state.mu.Unlock()
 
-	if remaining != 0 {
-		t.Fatalf("expected 0 items in queue after clear, got %d", remaining)
+	if hasCachedContent {
+		t.Fatal("expected cachedContent to be cleared")
 	}
 	if hasPinned {
 		t.Fatal("expected pinned handle to be cleared")
@@ -3054,7 +3072,7 @@ func TestHandleQueueResponse_Clear(t *testing.T) {
 	}
 }
 
-func TestCleanupInteractiveState_ClearsQueue(t *testing.T) {
+func TestCleanupInteractiveState_PreservesQueuePin(t *testing.T) {
 	e := newTestEngine()
 	p := &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
 	sessionKey := "test:user1"
@@ -3064,9 +3082,7 @@ func TestCleanupInteractiveState_ClearsQueue(t *testing.T) {
 		replyCtx: "ctx",
 	}
 	state.queue.pinnedHandle = "pinned-1"
-	state.queue.items = []*queuedMessage{
-		{msg: &Message{Content: "queued"}, queuedAt: time.Now()},
-	}
+	state.queue.cachedContent = formatQueuePin([]string{"queued"})
 
 	e.interactiveMu.Lock()
 	e.interactiveStates[sessionKey] = state
@@ -3074,8 +3090,9 @@ func TestCleanupInteractiveState_ClearsQueue(t *testing.T) {
 
 	e.cleanupInteractiveState(sessionKey)
 
-	if !p.unpinned {
-		t.Fatal("expected Unpin to be called on cleanup")
+	// Queue pin should NOT be unpinned — it is persistent storage
+	if p.unpinned {
+		t.Fatal("expected Unpin NOT to be called on cleanup (queue is persistent)")
 	}
 }
 
@@ -3084,9 +3101,7 @@ func TestFindQueueInteractiveKey_DirectMatch(t *testing.T) {
 	sessionKey := "test:user1"
 
 	state := &interactiveState{}
-	state.queue.items = []*queuedMessage{
-		{msg: &Message{Content: "queued"}, queuedAt: time.Now()},
-	}
+	state.queue.cachedContent = formatQueuePin([]string{"queued"})
 
 	e.interactiveMu.Lock()
 	e.interactiveStates[sessionKey] = state
@@ -3104,9 +3119,7 @@ func TestFindQueueInteractiveKey_WorkspacePrefix(t *testing.T) {
 	interactiveKey := "/tmp/ws:" + sessionKey
 
 	state := &interactiveState{}
-	state.queue.items = []*queuedMessage{
-		{msg: &Message{Content: "queued"}, queuedAt: time.Now()},
-	}
+	state.queue.cachedContent = formatQueuePin([]string{"queued"})
 
 	e.interactiveMu.Lock()
 	e.interactiveStates[interactiveKey] = state
@@ -3152,9 +3165,7 @@ func TestProcessNextInQueue_SendsConfirmation(t *testing.T) {
 		platform: p,
 		replyCtx: "ctx",
 	}
-	state.queue.items = []*queuedMessage{
-		{msg: &Message{Content: "next message"}, queuedAt: time.Now()},
-	}
+	state.queue.cachedContent = formatQueuePin([]string{"next message"})
 
 	e.interactiveMu.Lock()
 	e.interactiveStates[sessionKey] = state
