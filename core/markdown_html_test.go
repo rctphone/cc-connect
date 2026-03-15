@@ -348,28 +348,217 @@ func TestMarkdownToSimpleHTML_BlockquoteBreaksOnBlankLine(t *testing.T) {
 func TestMarkdownToSimpleHTML_Table(t *testing.T) {
 	md := "| Name | Age |\n|------|-----|\n| Alice | 30 |\n| Bob | 25 |"
 	out := MarkdownToSimpleHTML(md)
-	if !strings.Contains(out, "Name | Age") {
+	// Should use <pre> for plain-text tables.
+	if !strings.Contains(out, "<pre>") {
+		t.Errorf("expected <pre> block for plain table, got %q", out)
+	}
+	if !strings.Contains(out, "Name") || !strings.Contains(out, "Age") {
 		t.Errorf("expected table header cells, got %q", out)
 	}
-	if !strings.Contains(out, "——————————") {
-		t.Errorf("expected separator as rule, got %q", out)
-	}
-	if !strings.Contains(out, "Alice | 30") {
+	if !strings.Contains(out, "Alice") || !strings.Contains(out, "30") {
 		t.Errorf("expected table data cells, got %q", out)
+	}
+	// Should have separator line with dashes.
+	if !strings.Contains(out, "-----") {
+		t.Errorf("expected separator with dashes, got %q", out)
+	}
+}
+
+func TestMarkdownToSimpleHTML_TableAligned(t *testing.T) {
+	md := "| Name | Age |\n|------|-----|\n| Alice | 30 |\n| Bob | 25 |"
+	out := MarkdownToSimpleHTML(md)
+	// Columns should be padded to equal width.
+	lines := strings.Split(out, "\n")
+	// Find data lines inside <pre> block.
+	var dataLines []string
+	inPre := false
+	for _, l := range lines {
+		if strings.Contains(l, "<pre>") {
+			inPre = true
+			l = strings.TrimPrefix(l, "<pre>")
+		}
+		if strings.Contains(l, "</pre>") {
+			l = strings.TrimSuffix(l, "</pre>")
+			if inPre && l != "" {
+				dataLines = append(dataLines, l)
+			}
+			inPre = false
+			continue
+		}
+		if inPre {
+			dataLines = append(dataLines, l)
+		}
+	}
+	if len(dataLines) < 3 {
+		t.Fatalf("expected at least 3 lines (header+sep+data), got %d: %v", len(dataLines), dataLines)
+	}
+	// All non-separator lines should have the same display width.
+	firstWidth := -1
+	for _, dl := range dataLines {
+		if strings.Contains(dl, "---") || strings.Contains(dl, "-+-") {
+			continue
+		}
+		w := stringDisplayWidth(dl)
+		if firstWidth < 0 {
+			firstWidth = w
+		} else if w != firstWidth {
+			t.Errorf("lines have different widths: %d vs %d\nlines: %v", firstWidth, w, dataLines)
+		}
 	}
 }
 
 func TestMarkdownToSimpleHTML_TableWithFormatting(t *testing.T) {
 	md := "| **Header** | `code` |\n|---|---|\n| *italic* | normal |"
 	out := MarkdownToSimpleHTML(md)
+	// Should NOT use <pre> when cells have formatting.
+	if strings.Contains(out, "<pre>") {
+		t.Errorf("expected no <pre> for table with formatting, got %q", out)
+	}
 	if !strings.Contains(out, "<b>Header</b>") {
 		t.Errorf("expected bold in table cell, got %q", out)
 	}
 	if !strings.Contains(out, "<code>code</code>") {
 		t.Errorf("expected code in table cell, got %q", out)
 	}
+	// Header row should be wrapped in bold.
+	if !strings.Contains(out, "<b>") {
+		t.Errorf("expected bold header row, got %q", out)
+	}
+	if !strings.Contains(out, "——————————") {
+		t.Errorf("expected separator line, got %q", out)
+	}
 	if err := validateHTMLNesting(out); err != nil {
 		t.Errorf("invalid HTML nesting: %v, got %q", err, out)
+	}
+}
+
+func TestMarkdownToSimpleHTML_TableNoOuterPipes(t *testing.T) {
+	md := "| A | B |\n|---|---|\n| 1 | 2 |"
+	out := MarkdownToSimpleHTML(md)
+	// The rendered table should not have leading/trailing pipes.
+	if strings.Contains(out, "| A") && strings.Index(out, "| A") > 0 && out[strings.Index(out, "| A")-1] != ' ' {
+		// This is fine — it's the separator between columns.
+	}
+	// Check no outer pipes: content should be "A | B" not "| A | B |".
+	if strings.Contains(out, "| A |") {
+		t.Errorf("should not have outer pipes, got %q", out)
+	}
+}
+
+func TestMarkdownToSimpleHTML_TableWide(t *testing.T) {
+	// Table wider than maxPreTableWidth should truncate cells.
+	md := "| Name | Very Long Description Column | Status |\n|---|---|---|\n| Alice | This is a really long text value | Active |"
+	out := MarkdownToSimpleHTML(md)
+	if !strings.Contains(out, "<pre>") {
+		t.Errorf("expected <pre> even for wide table (should truncate), got %q", out)
+	}
+	// Should contain truncation marker.
+	if !strings.Contains(out, "…") {
+		t.Errorf("expected truncation marker '…' for wide table, got %q", out)
+	}
+}
+
+func TestMarkdownToSimpleHTML_TableVeryWideFallback(t *testing.T) {
+	// Table with >4 columns that is very wide should fall back to inline format.
+	md := "| A | B | C | D | E |\n|---|---|---|---|---|\n| very long cell one | very long cell two | very long cell three | very long cell four | very long cell five |"
+	out := MarkdownToSimpleHTML(md)
+	// With 5 columns of long content, total width exceeds threshold → fallback.
+	if strings.Contains(out, "<pre>") {
+		t.Errorf("very wide table with >4 cols should fall back to inline, got %q", out)
+	}
+	// Should have bold header.
+	if !strings.Contains(out, "<b>") {
+		t.Errorf("expected bold header in fallback, got %q", out)
+	}
+}
+
+func TestMarkdownToSimpleHTML_TableEmptyCells(t *testing.T) {
+	md := "| A | B |\n|---|---|\n| x |  |\n|  | y |"
+	out := MarkdownToSimpleHTML(md)
+	if !strings.Contains(out, "<pre>") {
+		t.Errorf("expected <pre> for plain table, got %q", out)
+	}
+	if !strings.Contains(out, "x") && !strings.Contains(out, "y") {
+		t.Errorf("expected cell content, got %q", out)
+	}
+}
+
+func TestMarkdownToSimpleHTML_TableSingleColumn(t *testing.T) {
+	md := "| Item |\n|------|\n| apple |\n| banana |"
+	out := MarkdownToSimpleHTML(md)
+	if !strings.Contains(out, "<pre>") {
+		t.Errorf("expected <pre> for single-column table, got %q", out)
+	}
+	if !strings.Contains(out, "apple") || !strings.Contains(out, "banana") {
+		t.Errorf("expected cell content, got %q", out)
+	}
+}
+
+func TestMarkdownToSimpleHTML_TableCJK(t *testing.T) {
+	md := "| 名前 | 年齢 |\n|------|------|\n| 太郎 | 30 |"
+	out := MarkdownToSimpleHTML(md)
+	if !strings.Contains(out, "<pre>") {
+		t.Errorf("expected <pre> for CJK table, got %q", out)
+	}
+	if !strings.Contains(out, "太郎") || !strings.Contains(out, "30") {
+		t.Errorf("expected CJK content, got %q", out)
+	}
+}
+
+func TestStringDisplayWidth(t *testing.T) {
+	tests := []struct {
+		s    string
+		want int
+	}{
+		{"hello", 5},
+		{"太郎", 4},     // 2 CJK chars × 2 = 4
+		{"A太郎B", 6},   // 1 + 2 + 2 + 1 = 6
+		{"", 0},
+		{"abc", 3},
+	}
+	for _, tt := range tests {
+		got := stringDisplayWidth(tt.s)
+		if got != tt.want {
+			t.Errorf("stringDisplayWidth(%q) = %d, want %d", tt.s, got, tt.want)
+		}
+	}
+}
+
+func TestTruncateToWidth(t *testing.T) {
+	tests := []struct {
+		s        string
+		maxWidth int
+		wantLen  int // display width of result should be <= maxWidth
+	}{
+		{"hello world", 5, 5},
+		{"short", 10, 5}, // no truncation needed
+		{"太郎太郎", 5, 5},
+	}
+	for _, tt := range tests {
+		got := truncateToWidth(tt.s, tt.maxWidth)
+		w := stringDisplayWidth(got)
+		if w > tt.maxWidth {
+			t.Errorf("truncateToWidth(%q, %d) = %q (width %d), exceeds max", tt.s, tt.maxWidth, got, w)
+		}
+	}
+}
+
+func TestHasMarkdownFormatting(t *testing.T) {
+	tests := []struct {
+		s    string
+		want bool
+	}{
+		{"plain text", false},
+		{"**bold**", true},
+		{"`code`", true},
+		{"~~strike~~", true},
+		{"no formatting here", false},
+	}
+	for _, tt := range tests {
+		got := hasMarkdownFormatting(tt.s)
+		if got != tt.want {
+			t.Errorf("hasMarkdownFormatting(%q) = %v, want %v", tt.s, got, tt.want)
+		}
 	}
 }
 
