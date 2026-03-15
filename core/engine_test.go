@@ -2777,6 +2777,13 @@ func TestCompactToolInput(t *testing.T) {
 		{"sibling dir uses ../", "Read", "/home/user/other/lib.go", 120, "/home/user/project", "`../other/lib.go`"},
 		{"binary basename in shell", "Bash", "/usr/bin/python3 script.py", 120, "", "`python3 script.py`"},
 		{"binary basename with workdir", "Bash", "/usr/local/bin/ruff check /home/user/project/src", 120, "/home/user/project", "`ruff check src`"},
+		{"search JSON query extraction", "WebSearch", `{"query":"iPhone 12 купить Wildberries цена 2026"}`, 120, "", "`iPhone 12 купить Wildberries цена 2026`"},
+		{"grep JSON pattern extraction", "Grep", `{"pattern":"error handling","path":"/src"}`, 120, "", "`error handling`"},
+		{"search plain text unchanged", "WebSearch", "iPhone 12 купить", 120, "", "`iPhone 12 купить`"},
+		{"JSON prompt extraction", "WebFetch", `{"prompt":"Найди все велосипедные фонари"}`, 120, "", "`Найди все велосипедные фонари`"},
+		{"JSON command extraction", "Bash", `{"command":"ls -la"}`, 120, "", "`ls -la`"},
+		{"JSON url extraction", "WebFetch", `{"url":"https://example.com"}`, 120, "", "`https://example.com`"},
+		{"non-JSON unchanged", "Bash", "echo hello", 120, "", "`echo hello`"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2812,5 +2819,366 @@ func TestShortenPaths(t *testing.T) {
 					tt.input, tt.workDir, tt.tool, got, tt.want)
 			}
 		})
+	}
+}
+
+// --- Message queue tests ---
+
+// stubPinnablePlatform supports both InlineButtonSender and PinnableMessage.
+type stubPinnablePlatform struct {
+	stubInlineButtonPlatform
+	pinnedContent string
+	pinnedHandle  any
+	unpinned      bool
+	editedContent string
+}
+
+func (p *stubPinnablePlatform) SendAndPin(_ context.Context, _ any, content string) (any, error) {
+	p.pinnedContent = content
+	p.pinnedHandle = "pinned-1"
+	return p.pinnedHandle, nil
+}
+
+func (p *stubPinnablePlatform) EditPinned(_ context.Context, _ any, content string) error {
+	p.editedContent = content
+	return nil
+}
+
+func (p *stubPinnablePlatform) Unpin(_ context.Context, _ any) error {
+	p.unpinned = true
+	return nil
+}
+
+func TestEnqueueMessage_AddsToQueue(t *testing.T) {
+	e := newTestEngine()
+	p := &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
+	sessionKey := "test:user1"
+
+	// Create an interactive state (simulating a busy session)
+	e.interactiveMu.Lock()
+	e.interactiveStates[sessionKey] = &interactiveState{
+		platform: p,
+		replyCtx: "ctx",
+	}
+	e.interactiveMu.Unlock()
+
+	msg := &Message{SessionKey: sessionKey, Content: "hello", ReplyCtx: "ctx", UserName: "user1"}
+	e.enqueueMessage(p, msg, e.agent, e.sessions, sessionKey, "")
+
+	e.interactiveMu.Lock()
+	state := e.interactiveStates[sessionKey]
+	e.interactiveMu.Unlock()
+
+	state.mu.Lock()
+	qLen := len(state.queue.items)
+	state.mu.Unlock()
+
+	if qLen != 1 {
+		t.Fatalf("expected 1 item in queue, got %d", qLen)
+	}
+
+	if p.pinnedContent == "" {
+		t.Fatal("expected pinned message to be created")
+	}
+}
+
+func TestEnqueueMessage_QueueFull(t *testing.T) {
+	e := newTestEngine()
+	p := &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
+	sessionKey := "test:user1"
+
+	// Create state with full queue
+	state := &interactiveState{
+		platform: p,
+		replyCtx: "ctx",
+	}
+	state.queue.maxSize = 2
+	state.queue.items = []*queuedMessage{
+		{msg: &Message{Content: "msg1"}, queuedAt: time.Now()},
+		{msg: &Message{Content: "msg2"}, queuedAt: time.Now()},
+	}
+
+	e.interactiveMu.Lock()
+	e.interactiveStates[sessionKey] = state
+	e.interactiveMu.Unlock()
+
+	msg := &Message{SessionKey: sessionKey, Content: "msg3", ReplyCtx: "ctx"}
+	e.enqueueMessage(p, msg, e.agent, e.sessions, sessionKey, "")
+
+	// Should have replied with queue full message
+	found := false
+	for _, s := range p.sent {
+		if strings.Contains(s, "2") { // maxSize in message
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected queue full message, got: %v", p.sent)
+	}
+}
+
+func TestHandleQueueResponse_Yes(t *testing.T) {
+	e := newTestEngine()
+	p := &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
+	sessionKey := "test:user1"
+
+	queuedMsg := &Message{SessionKey: sessionKey, Content: "queued message", ReplyCtx: "ctx", UserName: "user1"}
+
+	state := &interactiveState{
+		platform: p,
+		replyCtx: "ctx",
+	}
+	state.queue.confirmPending = true
+	state.queue.items = []*queuedMessage{
+		{
+			msg:            queuedMsg,
+			agent:          e.agent,
+			sessions:       e.sessions,
+			interactiveKey: sessionKey,
+			queuedAt:       time.Now(),
+		},
+	}
+
+	e.interactiveMu.Lock()
+	e.interactiveStates[sessionKey] = state
+	e.interactiveMu.Unlock()
+
+	msg := &Message{SessionKey: sessionKey, Content: "queue:yes", ReplyCtx: "ctx"}
+	handled := e.handleQueueResponse(p, msg, "queue:yes")
+
+	if !handled {
+		t.Fatal("expected queue response to be handled")
+	}
+
+	// Give goroutine a moment to start
+	time.Sleep(50 * time.Millisecond)
+
+	state.mu.Lock()
+	remaining := len(state.queue.items)
+	state.mu.Unlock()
+
+	if remaining != 0 {
+		t.Fatalf("expected 0 items in queue after yes, got %d", remaining)
+	}
+}
+
+func TestHandleQueueResponse_Skip(t *testing.T) {
+	e := newTestEngine()
+	p := &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
+	sessionKey := "test:user1"
+
+	state := &interactiveState{
+		platform: p,
+		replyCtx: "ctx",
+	}
+	state.queue.confirmPending = true
+	state.queue.items = []*queuedMessage{
+		{msg: &Message{Content: "first"}, queuedAt: time.Now()},
+		{msg: &Message{Content: "second"}, queuedAt: time.Now()},
+	}
+
+	e.interactiveMu.Lock()
+	e.interactiveStates[sessionKey] = state
+	e.interactiveMu.Unlock()
+
+	msg := &Message{SessionKey: sessionKey, Content: "queue:skip", ReplyCtx: "ctx"}
+	handled := e.handleQueueResponse(p, msg, "queue:skip")
+
+	if !handled {
+		t.Fatal("expected queue response to be handled")
+	}
+
+	// Check that the skip message was sent
+	found := false
+	for _, s := range p.sent {
+		if strings.Contains(s, "first") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected skip message mentioning 'first', got: %v", p.sent)
+	}
+
+	// Give goroutine time to process next
+	time.Sleep(50 * time.Millisecond)
+
+	state.mu.Lock()
+	remaining := len(state.queue.items)
+	state.mu.Unlock()
+
+	if remaining != 1 {
+		t.Fatalf("expected 1 item remaining in queue after skip, got %d", remaining)
+	}
+}
+
+func TestHandleQueueResponse_Clear(t *testing.T) {
+	e := newTestEngine()
+	p := &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
+	sessionKey := "test:user1"
+
+	state := &interactiveState{
+		platform: p,
+		replyCtx: "ctx",
+	}
+	state.queue.confirmPending = true
+	state.queue.pinnedHandle = "pinned-1"
+	state.queue.items = []*queuedMessage{
+		{msg: &Message{Content: "first"}, queuedAt: time.Now()},
+		{msg: &Message{Content: "second"}, queuedAt: time.Now()},
+	}
+
+	e.interactiveMu.Lock()
+	e.interactiveStates[sessionKey] = state
+	e.interactiveMu.Unlock()
+
+	msg := &Message{SessionKey: sessionKey, Content: "queue:clear", ReplyCtx: "ctx"}
+	handled := e.handleQueueResponse(p, msg, "queue:clear")
+
+	if !handled {
+		t.Fatal("expected queue response to be handled")
+	}
+
+	state.mu.Lock()
+	remaining := len(state.queue.items)
+	hasPinned := state.queue.pinnedHandle != nil
+	state.mu.Unlock()
+
+	if remaining != 0 {
+		t.Fatalf("expected 0 items in queue after clear, got %d", remaining)
+	}
+	if hasPinned {
+		t.Fatal("expected pinned handle to be cleared")
+	}
+	if !p.unpinned {
+		t.Fatal("expected Unpin to be called")
+	}
+}
+
+func TestCleanupInteractiveState_ClearsQueue(t *testing.T) {
+	e := newTestEngine()
+	p := &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
+	sessionKey := "test:user1"
+
+	state := &interactiveState{
+		platform: p,
+		replyCtx: "ctx",
+	}
+	state.queue.pinnedHandle = "pinned-1"
+	state.queue.items = []*queuedMessage{
+		{msg: &Message{Content: "queued"}, queuedAt: time.Now()},
+	}
+
+	e.interactiveMu.Lock()
+	e.interactiveStates[sessionKey] = state
+	e.interactiveMu.Unlock()
+
+	e.cleanupInteractiveState(sessionKey)
+
+	if !p.unpinned {
+		t.Fatal("expected Unpin to be called on cleanup")
+	}
+}
+
+func TestFindQueueInteractiveKey_DirectMatch(t *testing.T) {
+	e := newTestEngine()
+	sessionKey := "test:user1"
+
+	state := &interactiveState{}
+	state.queue.items = []*queuedMessage{
+		{msg: &Message{Content: "queued"}, queuedAt: time.Now()},
+	}
+
+	e.interactiveMu.Lock()
+	e.interactiveStates[sessionKey] = state
+	e.interactiveMu.Unlock()
+
+	found := e.findQueueInteractiveKey(sessionKey)
+	if found != sessionKey {
+		t.Fatalf("expected %q, got %q", sessionKey, found)
+	}
+}
+
+func TestFindQueueInteractiveKey_WorkspacePrefix(t *testing.T) {
+	e := newTestEngine()
+	sessionKey := "test:user1"
+	interactiveKey := "/tmp/ws:" + sessionKey
+
+	state := &interactiveState{}
+	state.queue.items = []*queuedMessage{
+		{msg: &Message{Content: "queued"}, queuedAt: time.Now()},
+	}
+
+	e.interactiveMu.Lock()
+	e.interactiveStates[interactiveKey] = state
+	e.interactiveMu.Unlock()
+
+	found := e.findQueueInteractiveKey(sessionKey)
+	if found != interactiveKey {
+		t.Fatalf("expected %q, got %q", interactiveKey, found)
+	}
+}
+
+func TestProcessNextInQueue_EmptyQueue(t *testing.T) {
+	e := newTestEngine()
+	sessionKey := "test:user1"
+
+	state := &interactiveState{
+		platform: &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}},
+		replyCtx: "ctx",
+	}
+
+	e.interactiveMu.Lock()
+	e.interactiveStates[sessionKey] = state
+	e.interactiveMu.Unlock()
+
+	// Should not panic on empty queue
+	e.processNextInQueue(sessionKey)
+
+	state.mu.Lock()
+	pending := state.queue.confirmPending
+	state.mu.Unlock()
+
+	if pending {
+		t.Fatal("expected confirmPending to remain false for empty queue")
+	}
+}
+
+func TestProcessNextInQueue_SendsConfirmation(t *testing.T) {
+	e := newTestEngine()
+	p := &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}
+	sessionKey := "test:user1"
+
+	state := &interactiveState{
+		platform: p,
+		replyCtx: "ctx",
+	}
+	state.queue.items = []*queuedMessage{
+		{msg: &Message{Content: "next message"}, queuedAt: time.Now()},
+	}
+
+	e.interactiveMu.Lock()
+	e.interactiveStates[sessionKey] = state
+	e.interactiveMu.Unlock()
+
+	e.processNextInQueue(sessionKey)
+
+	state.mu.Lock()
+	pending := state.queue.confirmPending
+	state.mu.Unlock()
+
+	if !pending {
+		t.Fatal("expected confirmPending to be true")
+	}
+
+	if p.buttonContent == "" {
+		t.Fatal("expected confirmation buttons to be sent")
+	}
+
+	if !strings.Contains(p.buttonContent, "next message") {
+		t.Fatalf("expected button content to contain queued message preview, got: %q", p.buttonContent)
+	}
+
+	if len(p.buttonRows) != 1 || len(p.buttonRows[0]) != 3 {
+		t.Fatalf("expected 1 row of 3 buttons, got %d rows", len(p.buttonRows))
 	}
 }

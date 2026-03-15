@@ -340,3 +340,11 @@ type CompactToolTracker interface {
 	// DeleteMessages deletes previously sent messages by their handles.
 	DeleteMessages(ctx context.Context, replyCtx any, handles []any)
 }
+
+// PinnableMessage is an optional interface for platforms that support
+// sending, editing, and pinning messages (used for message queue display).
+type PinnableMessage interface {
+	SendAndPin(ctx context.Context, replyCtx any, content string) (handle any, err error)
+	EditPinned(ctx context.Context, handle any, content string) error
+	Unpin(ctx context.Context, handle any) error
+}

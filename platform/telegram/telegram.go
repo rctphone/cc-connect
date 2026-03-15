@@ -507,6 +507,38 @@ func (p *Platform) handleCallbackQueryWithForum(cb *tgbotapi.CallbackQuery, thre
 		return
 	}
 
+	// Queue callbacks (queue:yes, queue:skip, queue:clear)
+	if strings.HasPrefix(data, "queue:") {
+		// Show user's choice on the original message
+		var choiceLabel string
+		switch data {
+		case "queue:yes":
+			choiceLabel = "▶️ Yes"
+		case "queue:skip":
+			choiceLabel = "⏭ Skip"
+		case "queue:clear":
+			choiceLabel = "🗑 Clear"
+		default:
+			choiceLabel = data
+		}
+		origText := cb.Message.Text
+		if origText == "" {
+			origText = "(queue)"
+		}
+		p.apiEditMessageText(chatID, msgID, origText+"\n\n"+choiceLabel, "", &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
+
+		p.handler(p, &core.Message{
+			SessionKey: sessionKey,
+			Platform:   "telegram",
+			UserID:     userID,
+			UserName:   userName,
+			Content:    data,
+			MessageID:  strconv.Itoa(msgID),
+			ReplyCtx:   rctx,
+		})
+		return
+	}
+
 	// Permission callbacks (perm:allow, perm:deny, perm:allow_all)
 	var responseText string
 	switch data {
@@ -773,6 +805,79 @@ func (p *Platform) DeleteMessages(ctx context.Context, rctx any, handles []any) 
 			slog.Debug("telegram: delete tracked message failed", "error", err, "msg_id", tm.messageID)
 		}
 	}
+}
+
+// pinnedMsgHandle stores info needed to edit/unpin a pinned message.
+type pinnedMsgHandle struct {
+	chatID    int64
+	messageID int
+	threadID  int
+}
+
+// SendAndPin implements core.PinnableMessage.
+func (p *Platform) SendAndPin(ctx context.Context, rctx any, content string) (any, error) {
+	rc, ok := rctx.(replyContext)
+	if !ok {
+		return nil, fmt.Errorf("telegram: invalid reply context type %T", rctx)
+	}
+	msgID, err := p.sendWithFallback(rc.chatID, content, 0, rc.messageThreadID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("telegram: sendAndPin: %w", err)
+	}
+
+	// Pin the message
+	params := make(tgbotapi.Params)
+	params.AddNonZero64("chat_id", rc.chatID)
+	params.AddNonZero("message_id", msgID)
+	params["disable_notification"] = "true"
+	if _, err := p.bot.MakeRequest("pinChatMessage", params); err != nil {
+		slog.Debug("telegram: pin message failed", "error", err, "msg_id", msgID)
+		// Don't fail — the message was sent, just couldn't be pinned
+	}
+
+	return &pinnedMsgHandle{chatID: rc.chatID, messageID: msgID, threadID: rc.messageThreadID}, nil
+}
+
+// EditPinned implements core.PinnableMessage.
+func (p *Platform) EditPinned(ctx context.Context, handle any, content string) error {
+	h, ok := handle.(*pinnedMsgHandle)
+	if !ok {
+		return fmt.Errorf("telegram: invalid pinned handle type %T", handle)
+	}
+	html := core.MarkdownToSimpleHTML(content)
+	err := p.apiEditMessageText(h.chatID, h.messageID, html, tgbotapi.ModeHTML, nil)
+	if err != nil {
+		if strings.Contains(err.Error(), "not modified") {
+			return nil
+		}
+		// Fall back to plain text
+		err2 := p.apiEditMessageText(h.chatID, h.messageID, content, "", nil)
+		if err2 != nil && strings.Contains(err2.Error(), "not modified") {
+			return nil
+		}
+		return err2
+	}
+	return nil
+}
+
+// Unpin implements core.PinnableMessage.
+func (p *Platform) Unpin(ctx context.Context, handle any) error {
+	h, ok := handle.(*pinnedMsgHandle)
+	if !ok {
+		return fmt.Errorf("telegram: invalid pinned handle type %T", handle)
+	}
+	params := make(tgbotapi.Params)
+	params.AddNonZero64("chat_id", h.chatID)
+	params.AddNonZero("message_id", h.messageID)
+	if _, err := p.bot.MakeRequest("unpinChatMessage", params); err != nil {
+		slog.Debug("telegram: unpin message failed", "error", err, "msg_id", h.messageID)
+	}
+	// Also delete the pinned message to clean up
+	del := tgbotapi.NewDeleteMessage(h.chatID, h.messageID)
+	if _, err := p.bot.Request(del); err != nil {
+		slog.Debug("telegram: delete pinned message failed", "error", err, "msg_id", h.messageID)
+	}
+	return nil
 }
 
 func (p *Platform) downloadFile(fileID string) ([]byte, error) {

@@ -12,6 +12,7 @@ const (
 	LangTraditionalChinese Language = "zh-TW"
 	LangJapanese           Language = "ja"
 	LangSpanish            Language = "es"
+	LangRussian            Language = "ru"
 )
 
 // I18n provides internationalized messages
@@ -38,6 +39,11 @@ func DetectLanguage(text string) Language {
 	for _, r := range text {
 		if isChinese(r) {
 			return LangChinese
+		}
+	}
+	for _, r := range text {
+		if isCyrillic(r) {
+			return LangRussian
 		}
 	}
 	if isSpanishHint(text) {
@@ -73,6 +79,12 @@ func isSpanishHint(text string) bool {
 		}
 	}
 	return false
+}
+
+// isCyrillic checks for Cyrillic characters (Russian, Ukrainian, etc.).
+func isCyrillic(r rune) bool {
+	return (r >= 0x0400 && r <= 0x04FF) || // Cyrillic
+		(r >= 0x0500 && r <= 0x052F) // Cyrillic Supplement
 }
 
 func (i *I18n) DetectAndSet(text string) {
@@ -467,6 +479,16 @@ const (
 	MsgWsCloneProgress     MsgKey = "ws_clone_progress"
 	MsgWsCloneSuccess      MsgKey = "ws_clone_success"
 	MsgWsCloneFailed       MsgKey = "ws_clone_failed"
+
+	// Message queue
+	MsgQueueTitle   MsgKey = "queue_title"
+	MsgQueueFull    MsgKey = "queue_full"
+	MsgQueueConfirm MsgKey = "queue_confirm"
+	MsgQueueBtnYes  MsgKey = "queue_btn_yes"
+	MsgQueueBtnSkip MsgKey = "queue_btn_skip"
+	MsgQueueBtnClear MsgKey = "queue_btn_clear"
+	MsgQueueCleared MsgKey = "queue_cleared"
+	MsgQueueSkipped MsgKey = "queue_skipped"
 )
 
 var messages = map[MsgKey]map[Language]string{
@@ -476,10 +498,12 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⏳ 處理中...",
 		LangJapanese:           "⏳ 処理中...",
 		LangSpanish:            "⏳ Procesando...",
+		LangRussian:            "⏳ Обрабатываю...",
 	},
 	MsgThinking: {
 		LangEnglish: "💭 %s",
 		LangChinese: "💭 %s",
+		LangRussian: "💭 %s",
 	},
 	MsgTool: {
 		LangEnglish:            "🔧 **Tool #%d: %s**\n---\n%s",
@@ -487,6 +511,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔧 **工具 #%d: %s**\n---\n%s",
 		LangJapanese:           "🔧 **ツール #%d: %s**\n---\n%s",
 		LangSpanish:            "🔧 **Herramienta #%d: %s**\n---\n%s",
+		LangRussian:            "🔧 **Инструмент #%d: %s**\n---\n%s",
 	},
 	MsgExecutionStopped: {
 		LangEnglish:            "⏹ Execution stopped.",
@@ -494,6 +519,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⏹ 執行已停止。",
 		LangJapanese:           "⏹ 実行を停止しました。",
 		LangSpanish:            "⏹ Ejecución detenida.",
+		LangRussian:            "⏹ Выполнение остановлено.",
 	},
 	MsgNoExecution: {
 		LangEnglish:            "No execution in progress.",
@@ -501,6 +527,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "沒有正在執行的任務。",
 		LangJapanese:           "実行中のタスクはありません。",
 		LangSpanish:            "No hay ejecución en progreso.",
+		LangRussian:            "Нет активного выполнения.",
 	},
 	MsgPreviousProcessing: {
 		LangEnglish:            "⏳ Previous request still processing, please wait...",
@@ -508,6 +535,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⏳ 上一個請求仍在處理中，請稍候...",
 		LangJapanese:           "⏳ 前のリクエストを処理中です。お待ちください...",
 		LangSpanish:            "⏳ La solicitud anterior aún se está procesando, por favor espere...",
+		LangRussian:            "⏳ Предыдущий запрос ещё обрабатывается, подождите...",
 	},
 	MsgNoToolsAllowed: {
 		LangEnglish:            "No tools pre-allowed.\nUsage: `/allow <tool_name>`\nExample: `/allow Bash`",
@@ -515,6 +543,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "尚未預授權任何工具。\n用法: `/allow <工具名>`\n範例: `/allow Bash`",
 		LangJapanese:           "事前許可されたツールはありません。\n使い方: `/allow <ツール名>`\n例: `/allow Bash`",
 		LangSpanish:            "No hay herramientas pre-autorizadas.\nUso: `/allow <nombre_herramienta>`\nEjemplo: `/allow Bash`",
+		LangRussian:            "Нет предварительно разрешённых инструментов.\nИспользование: `/allow <имя_инструмента>`\nПример: `/allow Bash`",
 	},
 	MsgCurrentTools: {
 		LangEnglish:            "Pre-allowed tools: %s",
@@ -522,6 +551,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "預授權的工具: %s",
 		LangJapanese:           "事前許可済みツール: %s",
 		LangSpanish:            "Herramientas pre-autorizadas: %s",
+		LangRussian:            "Предварительно разрешённые инструменты: %s",
 	},
 	MsgCurrentSession: {
 		LangEnglish:            "📌 Current session\nName: %s\nSession ID: %s\nLocal messages: %d",
@@ -529,6 +559,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "📌 目前工作階段\n名稱: %s\n工作階段 ID: %s\n本機訊息數: %d",
 		LangJapanese:           "📌 現在のセッション\n名前: %s\nセッション ID: %s\nローカルメッセージ数: %d",
 		LangSpanish:            "📌 Sesión actual\nNombre: %s\nID de sesión: %s\nMensajes locales: %d",
+		LangRussian:            "📌 Текущая сессия\nИмя: %s\nID сессии: %s\nЛокальных сообщений: %d",
 	},
 	MsgToolAuthNotSupported: {
 		LangEnglish:            "This agent does not support tool authorization.",
@@ -536,6 +567,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "此代理不支援工具授權。",
 		LangJapanese:           "このエージェントはツール認可をサポートしていません。",
 		LangSpanish:            "Este agente no soporta la autorización de herramientas.",
+		LangRussian:            "Этот агент не поддерживает авторизацию инструментов.",
 	},
 	MsgToolAllowFailed: {
 		LangEnglish:            "Failed to allow tool: %v",
@@ -543,6 +575,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "授權工具失敗: %v",
 		LangJapanese:           "ツール許可に失敗しました: %v",
 		LangSpanish:            "Error al autorizar herramienta: %v",
+		LangRussian:            "Не удалось разрешить инструмент: %v",
 	},
 	MsgToolAllowedNew: {
 		LangEnglish:            "✅ Tool `%s` pre-allowed. Takes effect on next session.",
@@ -550,6 +583,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 工具 `%s` 已預授權。將在下次會話生效。",
 		LangJapanese:           "✅ ツール `%s` を事前許可しました。次のセッションから有効になります。",
 		LangSpanish:            "✅ Herramienta `%s` pre-autorizada. Se aplicará en la próxima sesión.",
+		LangRussian:            "✅ Инструмент `%s` предварительно разрешён. Вступит в силу в следующей сессии.",
 	},
 	MsgError: {
 		LangEnglish:            "❌ Error: %v",
@@ -557,6 +591,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 錯誤: %v",
 		LangJapanese:           "❌ エラー: %v",
 		LangSpanish:            "❌ Error: %v",
+		LangRussian:            "❌ Ошибка: %v",
 	},
 	MsgEmptyResponse: {
 		LangEnglish:            "(empty response)",
@@ -564,6 +599,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "(空回應)",
 		LangJapanese:           "（空のレスポンス）",
 		LangSpanish:            "(respuesta vacía)",
+		LangRussian:            "(пустой ответ)",
 	},
 	MsgPermissionPrompt: {
 		LangEnglish:            "⚠️ **Permission Request**\n\nAgent wants to use **%s**:\n\n```\n%s\n```\n\nReply **allow** / **deny** / **allow all** (skip all future prompts this session).",
@@ -571,6 +607,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⚠️ **權限請求**\n\nAgent 想要使用 **%s**:\n\n```\n%s\n```\n\n回覆 **允許** / **拒絕** / **允許所有**（本次會話不再提醒）。",
 		LangJapanese:           "⚠️ **権限リクエスト**\n\nエージェントが **%s** を使用しようとしています:\n\n```\n%s\n```\n\n**allow** / **deny** / **allow all**（このセッション中は全て自動許可）で返信してください。",
 		LangSpanish:            "⚠️ **Solicitud de permiso**\n\nEl agente quiere usar **%s**:\n\n```\n%s\n```\n\nResponda **allow** / **deny** / **allow all** (omitir futuras solicitudes en esta sesión).",
+		LangRussian:            "⚠️ **Запрос разрешения**\n\nАгент хочет использовать **%s**:\n\n```\n%s\n```\n\nОтветьте **allow** / **deny** / **allow all** (автоматически разрешать всё в этой сессии).",
 	},
 	MsgPermissionAllowed: {
 		LangEnglish:            "✅ Allowed, continuing...",
@@ -578,6 +615,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 已允許，繼續執行...",
 		LangJapanese:           "✅ 許可しました。続行中...",
 		LangSpanish:            "✅ Permitido, continuando...",
+		LangRussian:            "✅ Разрешено, продолжаю...",
 	},
 	MsgPermissionApproveAll: {
 		LangEnglish:            "✅ All permissions auto-approved for this session.",
@@ -585,6 +623,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 本次會話已開啟自動批准，後續權限請求將自動允許。",
 		LangJapanese:           "✅ このセッションの全ての権限を自動承認に設定しました。",
 		LangSpanish:            "✅ Todos los permisos se aprobarán automáticamente en esta sesión.",
+		LangRussian:            "✅ Все разрешения в этой сессии будут одобряться автоматически.",
 	},
 	MsgPermissionDenied: {
 		LangEnglish:            "❌ Denied. Agent will stop this tool use.",
@@ -592,6 +631,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 已拒絕。Agent 將停止此工具使用。",
 		LangJapanese:           "❌ 拒否しました。エージェントはこのツールの使用を中止します。",
 		LangSpanish:            "❌ Denegado. El agente detendrá el uso de esta herramienta.",
+		LangRussian:            "❌ Отказано. Агент прекратит использование этого инструмента.",
 	},
 	MsgPermissionHint: {
 		LangEnglish:            "⚠️ Waiting for permission response. Reply **allow** / **deny** / **allow all**.",
@@ -599,6 +639,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⚠️ 等待權限回應。請回覆 **允許** / **拒絕** / **允許所有**。",
 		LangJapanese:           "⚠️ 権限の応答を待っています。**allow** / **deny** / **allow all** で返信してください。",
 		LangSpanish:            "⚠️ Esperando respuesta de permiso. Responda **allow** / **deny** / **allow all**.",
+		LangRussian:            "⚠️ Ожидаю ответ на запрос разрешения. Ответьте **allow** / **deny** / **allow all**.",
 	},
 	MsgQuietOn: {
 		LangEnglish:            "🔇 Quiet mode ON — thinking and tool progress messages will be hidden.",
@@ -606,6 +647,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔇 安靜模式已開啟 — 將不再推送思考和工具調用進度訊息。",
 		LangJapanese:           "🔇 静音モード ON — 思考とツール実行の進捗メッセージを非表示にします。",
 		LangSpanish:            "🔇 Modo silencioso activado — los mensajes de progreso se ocultarán.",
+		LangRussian:            "🔇 Тихий режим ВКЛ — сообщения о размышлениях и прогрессе инструментов будут скрыты.",
 	},
 	MsgQuietOff: {
 		LangEnglish:            "🔔 Quiet mode OFF — thinking and tool progress messages will be shown.",
@@ -613,6 +655,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔔 安靜模式已關閉 — 將恢復推送思考和工具調用進度訊息。",
 		LangJapanese:           "🔔 静音モード OFF — 思考とツール実行の進捗メッセージを表示します。",
 		LangSpanish:            "🔔 Modo silencioso desactivado — los mensajes de progreso se mostrarán.",
+		LangRussian:            "🔔 Тихий режим ВЫКЛ — сообщения о размышлениях и прогрессе инструментов будут показаны.",
 	},
 	MsgQuietGlobalOn: {
 		LangEnglish:            "🔇 Global quiet mode ON — all sessions will hide thinking and tool progress.",
@@ -620,6 +663,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔇 全域安靜模式已開啟 — 所有會話將不再推送思考和工具調用進度訊息。",
 		LangJapanese:           "🔇 グローバル静音モード ON — 全セッションで思考とツール進捗を非表示にします。",
 		LangSpanish:            "🔇 Modo silencioso global activado — todas las sesiones ocultarán los mensajes de progreso.",
+		LangRussian:            "🔇 Глобальный тихий режим ВКЛ — во всех сессиях размышления и прогресс инструментов будут скрыты.",
 	},
 	MsgQuietGlobalOff: {
 		LangEnglish:            "🔔 Global quiet mode OFF — all sessions will show thinking and tool progress.",
@@ -627,6 +671,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔔 全域安靜模式已關閉 — 所有會話將恢復推送思考和工具調用進度訊息。",
 		LangJapanese:           "🔔 グローバル静音モード OFF — 全セッションで思考とツール進捗を表示します。",
 		LangSpanish:            "🔔 Modo silencioso global desactivado — todas las sesiones mostrarán los mensajes de progreso.",
+		LangRussian:            "🔔 Глобальный тихий режим ВЫКЛ — во всех сессиях размышления и прогресс инструментов будут показаны.",
 	},
 	MsgModeChanged: {
 		LangEnglish:            "🔄 Permission mode switched to **%s**. New sessions will use this mode.",
@@ -634,6 +679,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔄 權限模式已切換為 **%s**，新會話將使用此模式。",
 		LangJapanese:           "🔄 権限モードを **%s** に切り替えました。新しいセッションで有効になります。",
 		LangSpanish:            "🔄 Modo de permisos cambiado a **%s**. Las nuevas sesiones usarán este modo.",
+		LangRussian:            "🔄 Режим разрешений переключён на **%s**. Новые сессии будут использовать этот режим.",
 	},
 	MsgModeNotSupported: {
 		LangEnglish:            "This agent does not support permission mode switching.",
@@ -641,6 +687,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前 Agent 不支援權限模式切換。",
 		LangJapanese:           "このエージェントは権限モードの切り替えをサポートしていません。",
 		LangSpanish:            "Este agente no soporta el cambio de modo de permisos.",
+		LangRussian:            "Этот агент не поддерживает переключение режима разрешений.",
 	},
 	MsgSessionRestarting: {
 		LangEnglish:            "🔄 Session process exited, restarting...",
@@ -648,6 +695,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔄 會話進程已退出，正在重啟...",
 		LangJapanese:           "🔄 セッションプロセスが終了しました。再起動中...",
 		LangSpanish:            "🔄 El proceso de sesión finalizó, reiniciando...",
+		LangRussian:            "🔄 Процесс сессии завершился, перезапускаю...",
 	},
 	MsgSessionNotStarted: {
 		LangEnglish:            "(new — not yet started)",
@@ -655,6 +703,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "(新會話 — 尚未開始)",
 		LangJapanese:           "(新規 — まだ開始されていません)",
 		LangSpanish:            "(nuevo — aún no iniciado)",
+		LangRussian:            "(новая — ещё не запущена)",
 	},
 	MsgLangChanged: {
 		LangEnglish:            "🌐 Language switched to **%s**.",
@@ -662,6 +711,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🌐 語言已切換為 **%s**。",
 		LangJapanese:           "🌐 言語を **%s** に切り替えました。",
 		LangSpanish:            "🌐 Idioma cambiado a **%s**.",
+		LangRussian:            "🌐 Язык переключён на **%s**.",
 	},
 	MsgLangInvalid: {
 		LangEnglish:            "Unknown language. Supported: `en`, `zh`, `zh-TW`, `ja`, `es`, `auto`.",
@@ -669,6 +719,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "未知語言。支援: `en`, `zh`, `zh-TW`, `ja`, `es`, `auto`。",
 		LangJapanese:           "不明な言語です。対応: `en`, `zh`, `zh-TW`, `ja`, `es`, `auto`。",
 		LangSpanish:            "Idioma desconocido. Soportados: `en`, `zh`, `zh-TW`, `ja`, `es`, `auto`.",
+		LangRussian:            "Неизвестный язык. Поддерживаются: `en`, `zh`, `zh-TW`, `ja`, `es`, `ru`, `auto`.",
 	},
 	MsgLangCurrent: {
 		LangEnglish:            "🌐 Current language: **%s**\n\nUsage: /lang <en|zh|zh-TW|ja|es|auto>",
@@ -676,6 +727,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🌐 當前語言: **%s**\n\n用法: /lang <en|zh|zh-TW|ja|es|auto>",
 		LangJapanese:           "🌐 現在の言語: **%s**\n\n使い方: /lang <en|zh|zh-TW|ja|es|auto>",
 		LangSpanish:            "🌐 Idioma actual: **%s**\n\nUso: /lang <en|zh|zh-TW|ja|es|auto>",
+		LangRussian:            "🌐 Текущий язык: **%s**\n\nИспользование: /lang <en|zh|zh-TW|ja|es|ru|auto>",
 	},
 	MsgUnknownCommand: {
 		LangEnglish:            "`%s` is not a cc-connect command, forwarding to agent...",
@@ -683,6 +735,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "`%s` 不是 cc-connect 命令，已轉發給 Agent 處理...",
 		LangJapanese:           "`%s` は cc-connect のコマンドではありません。エージェントに転送します...",
 		LangSpanish:            "`%s` no es un comando de cc-connect, reenviando al agente...",
+		LangRussian:            "`%s` не является командой cc-connect, передаю агенту...",
 	},
 	MsgHelp: {
 		LangEnglish: "📖 Available Commands\n\n" +
@@ -888,6 +941,47 @@ var messages = map[MsgKey]map[Language]string{
 			"Alias de comandos: use `/alias add <trigger> <comando>` o `[[aliases]]` en config.toml.\n\n" +
 			"Skills del agente: descubiertos de .claude/skills/<name>/SKILL.md etc.\n\n" +
 			"Modos de permisos: default / edit / plan / yolo",
+		LangRussian: "📖 Доступные команды\n\n" +
+			"/new [имя]\n  Создать новую сессию\n\n" +
+			"/list\n  Список сессий агента\n\n" +
+			"/search <ключевое_слово>\n  Поиск сессий по имени или ID\n\n" +
+			"/switch <номер>\n  Переключиться на сессию по номеру в списке\n\n" +
+			"/delete <номер>|1,2,3|3-7|1,3-5,8\n  Удалить сессии по номеру в списке\n\n" +
+			"/name [номер] <текст>\n  Дать имя сессии для удобства\n\n" +
+			"/current\n  Показать текущую активную сессию\n\n" +
+			"/history [n]\n  Показать последние n сообщений (по умолчанию 10)\n\n" +
+			"/provider [list|add|remove|switch|clear]\n  Управление провайдерами API\n\n" +
+			"/memory [add|global|global add]\n  Просмотр/редактирование файлов памяти агента\n\n" +
+			"/allow <инструмент>\n  Предварительно разрешить инструмент (следующая сессия)\n\n" +
+			"/model [имя]\n  Просмотр/переключение модели\n\n" +
+			"/reasoning [уровень]\n  Просмотр/переключение уровня рассуждений\n\n" +
+			"/mode [имя]\n  Просмотр/переключение режима разрешений\n\n" +
+			"/lang [en|zh|zh-TW|ja|es|ru|auto]\n  Просмотр/переключение языка\n\n" +
+			"/quiet [global]\n  Вкл/выкл сообщения о размышлениях и прогрессе (global = все сессии)\n\n" +
+			"/compress\n  Сжать контекст диалога\n\n" +
+			"/tts [always|voice_only]\n  Просмотр/переключение режима синтеза речи\n\n" +
+			"/shell <команда>\n  Выполнить shell-команду и вернуть результат\n\n" +
+			"/stop\n  Остановить текущее выполнение\n\n" +
+			"/cron [add|list|del|enable|disable]\n  Управление запланированными задачами\n\n" +
+			"/heartbeat [status|pause|resume|run|interval]\n  Управление heartbeat\n\n" +
+			"/commands [add|del]\n  Управление пользовательскими командами\n\n" +
+			"/alias [add|del]\n  Управление алиасами команд (напр. помощь → /help)\n\n" +
+			"/skills\n  Список навыков агента (из SKILL.md)\n\n" +
+			"/config [get|set|reload] [key] [value]\n  Просмотр/изменение настроек\n\n" +
+			"/bind [проект|remove]\n  Управление ретрансляцией в групповых чатах\n\n" +
+			"/workspace [init]\n  Управление рабочим пространством\n\n" +
+			"/doctor\n  Запустить диагностику системы\n\n" +
+			"/usage\n  Показать использование квоты аккаунта/модели\n\n" +
+			"/upgrade\n  Проверить обновления и обновиться\n\n" +
+			"/restart\n  Перезапустить сервис cc-connect\n\n" +
+			"/status\n  Показать статус системы\n\n" +
+			"/version\n  Показать версию cc-connect\n\n" +
+			"/help\n  Показать эту справку\n\n" +
+			"Совет: команды поддерживают сопоставление по префиксу, напр. `/pro l` = `/provider list`, `/sw 2` = `/switch 2`.\n\n" +
+			"Пользовательские команды: через `/commands add` или `[[commands]]` в config.toml.\n\n" +
+			"Алиасы команд: `/alias add <триггер> <команда>` или `[[aliases]]` в config.toml.\n\n" +
+			"Навыки агента: автоматически обнаруживаются из .claude/skills/<name>/SKILL.md и т.д.\n\n" +
+			"Режимы разрешений: default / edit / plan / yolo",
 	},
 	MsgHelpTitle: {
 		LangEnglish:            "cc-connect Help",
@@ -895,6 +989,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "cc-connect 說明",
 		LangJapanese:           "cc-connect ヘルプ",
 		LangSpanish:            "cc-connect Ayuda",
+		LangRussian:            "Справка cc-connect",
 	},
 	MsgHelpSessionSection: {
 		LangEnglish: "**Session Management**\n" +
@@ -942,6 +1037,15 @@ var messages = map[MsgKey]map[Language]string{
 			"/name [número] <texto> — Nombrar sesión\n" +
 			"/current — Mostrar sesión activa\n" +
 			"/history [n] — Mostrar últimos n mensajes",
+		LangRussian: "**Управление сессиями**\n" +
+			"/new [имя] — Создать новую сессию\n" +
+			"/list — Список сессий\n" +
+			"/search <ключевое_слово> — Поиск сессий\n" +
+			"/switch <номер> — Переключиться на сессию\n" +
+			"/delete <номер>|1,2,3|3-7|1,3-5,8 — Удалить сессию(и)\n" +
+			"/name [номер] <текст> — Назвать сессию\n" +
+			"/current — Показать активную сессию\n" +
+			"/history [n] — Показать последние n сообщений",
 	},
 	MsgHelpAgentSection: {
 		LangEnglish: "**Agent Configuration**\n" +
@@ -984,6 +1088,14 @@ var messages = map[MsgKey]map[Language]string{
 			"/allow <herramienta> — Pre-autorizar herramienta\n" +
 			"/lang [en|zh|...] — Ver/cambiar idioma\n" +
 			"/quiet [global] — Alternar mensajes de progreso",
+		LangRussian: "**Настройки агента**\n" +
+			"/model [имя] — Просмотр/переключение модели\n" +
+			"/mode [имя] — Просмотр/переключение режима разрешений\n" +
+			"/provider [list|add|...] — Управление провайдерами\n" +
+			"/memory [add|global|...] — Просмотр/редактирование памяти\n" +
+			"/allow <инструмент> — Предварительно разрешить инструмент\n" +
+			"/lang [en|zh|...] — Просмотр/переключение языка\n" +
+			"/quiet [global] — Вкл/выкл сообщений о прогрессе",
 	},
 	MsgHelpToolsSection: {
 		LangEnglish: "**Tools & Automation**\n" +
@@ -1026,6 +1138,14 @@ var messages = map[MsgKey]map[Language]string{
 			"/skills — Listar skills del agente\n" +
 			"/compress — Comprimir contexto\n" +
 			"/stop — Detener ejecución actual",
+		LangRussian: "**Инструменты и автоматизация**\n" +
+			"/shell <команда> — Выполнить shell-команду\n" +
+			"/cron [add|list|del|...] — Запланированные задачи\n" +
+			"/commands [add|del] — Пользовательские команды\n" +
+			"/alias [add|del] — Алиасы команд\n" +
+			"/skills — Список навыков агента\n" +
+			"/compress — Сжать контекст\n" +
+			"/stop — Остановить выполнение",
 	},
 	MsgHelpSystemSection: {
 		LangEnglish: "**System**\n" +
@@ -1068,6 +1188,14 @@ var messages = map[MsgKey]map[Language]string{
 			"/restart — Reiniciar servicio\n" +
 			"/status — Estado del sistema\n" +
 			"/version — Mostrar versión",
+		LangRussian: "**Система**\n" +
+			"/config [get|set|reload] — Настройки\n" +
+			"/doctor — Диагностика системы\n" +
+			"/usage — Использование квоты аккаунта/модели\n" +
+			"/upgrade — Проверить обновления\n" +
+			"/restart — Перезапустить сервис\n" +
+			"/status — Статус системы\n" +
+			"/version — Показать версию",
 	},
 	MsgHelpTip: {
 		LangEnglish:            "Tip: Commands support prefix matching, e.g. /pro l = /provider list",
@@ -1075,6 +1203,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "提示：命令支持前綴匹配，如 /pro l = /provider list",
 		LangJapanese:           "ヒント：コマンドはプレフィックスマッチに対応、例: /pro l = /provider list",
 		LangSpanish:            "Consejo: Los comandos admiten coincidencia por prefijo, ej. /pro l = /provider list",
+		LangRussian:            "Совет: команды поддерживают сопоставление по префиксу, напр. /pro l = /provider list",
 	},
 	MsgListTitle: {
 		LangEnglish:            "**%s Sessions** (%d)\n\n",
@@ -1082,6 +1211,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "**%s 會話列表** (%d)\n\n",
 		LangJapanese:           "**%s セッション** (%d)\n\n",
 		LangSpanish:            "**Sesiones de %s** (%d)\n\n",
+		LangRussian:            "**Сессии %s** (%d)\n\n",
 	},
 	MsgListTitlePaged: {
 		LangEnglish:            "**%s Sessions** (%d) · Page %d/%d\n\n",
@@ -1089,6 +1219,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "**%s 會話列表** (%d) · 第 %d/%d 頁\n\n",
 		LangJapanese:           "**%s セッション** (%d) · %d/%d ページ\n\n",
 		LangSpanish:            "**Sesiones de %s** (%d) · Página %d/%d\n\n",
+		LangRussian:            "**Сессии %s** (%d) · Страница %d/%d\n\n",
 	},
 	MsgListEmpty: {
 		LangEnglish:            "No sessions found for this project.",
@@ -1096,6 +1227,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "未找到此項目的會話。",
 		LangJapanese:           "このプロジェクトのセッションが見つかりません。",
 		LangSpanish:            "No se encontraron sesiones para este proyecto.",
+		LangRussian:            "Сессии для этого проекта не найдены.",
 	},
 	MsgListMore: {
 		LangEnglish:            "\n... and %d more\n",
@@ -1103,6 +1235,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "\n... 還有 %d 條\n",
 		LangJapanese:           "\n... 他 %d 件\n",
 		LangSpanish:            "\n... y %d más\n",
+		LangRussian:            "\n... и ещё %d\n",
 	},
 	MsgListPageHint: {
 		LangEnglish:            "\n\nPage %d/%d \n\n`/list <page>` for more\n",
@@ -1110,6 +1243,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "\n\n第 %d/%d 頁 \n\n`/list <頁碼>` 翻頁\n",
 		LangJapanese:           "\n\n%d/%d ページ \n\n`/list <ページ>` で移動\n",
 		LangSpanish:            "\n\nPágina %d/%d \n\n`/list <página>` para más\n",
+		LangRussian:            "\n\nСтраница %d/%d \n\n`/list <страница>` для навигации\n",
 	},
 	MsgListSwitchHint: {
 		LangEnglish:            "\n`/switch <number>` to switch session",
@@ -1117,6 +1251,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "\n`/switch <序號>` 切換會話",
 		LangJapanese:           "\n`/switch <番号>` でセッション切替",
 		LangSpanish:            "\n`/switch <número>` para cambiar sesión",
+		LangRussian:            "\n`/switch <номер>` для переключения сессии",
 	},
 	MsgListError: {
 		LangEnglish:            "❌ Failed to list sessions: %v",
@@ -1124,6 +1259,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 取得會話列表失敗: %v",
 		LangJapanese:           "❌ セッション一覧の取得に失敗しました: %v",
 		LangSpanish:            "❌ Error al listar sesiones: %v",
+		LangRussian:            "❌ Не удалось получить список сессий: %v",
 	},
 	MsgHistoryEmpty: {
 		LangEnglish:            "No history in current session.",
@@ -1131,6 +1267,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前會話暫無歷史訊息。",
 		LangJapanese:           "現在のセッションに履歴がありません。",
 		LangSpanish:            "No hay historial en la sesión actual.",
+		LangRussian:            "В текущей сессии нет истории сообщений.",
 	},
 	MsgNameUsage: {
 		LangEnglish:            "Usage:\n`/name <text>` — name the current session\n`/name <number> <text>` — name a session by list number",
@@ -1138,6 +1275,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：\n`/name <名稱>` — 命名當前會話\n`/name <序號> <名稱>` — 按列表序號命名會話",
 		LangJapanese:           "使い方：\n`/name <名前>` — 現在のセッションに名前を付ける\n`/name <番号> <名前>` — リスト番号でセッションに名前を付ける",
 		LangSpanish:            "Uso:\n`/name <texto>` — nombrar la sesión actual\n`/name <número> <texto>` — nombrar una sesión por número de lista",
+		LangRussian:            "Использование:\n`/name <текст>` — назвать текущую сессию\n`/name <номер> <текст>` — назвать сессию по номеру в списке",
 	},
 	MsgNameSet: {
 		LangEnglish:            "✅ Session named: **%s** (%s)",
@@ -1145,6 +1283,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 會話已命名：**%s** (%s)",
 		LangJapanese:           "✅ セッション名設定：**%s** (%s)",
 		LangSpanish:            "✅ Sesión nombrada: **%s** (%s)",
+		LangRussian:            "✅ Сессия названа: **%s** (%s)",
 	},
 	MsgNameNoSession: {
 		LangEnglish:            "❌ No active session. Send a message first or switch to a session.",
@@ -1152,6 +1291,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 沒有活躍會話，請先傳送訊息或切換到一個會話。",
 		LangJapanese:           "❌ アクティブなセッションがありません。メッセージを送信するかセッションに切り替えてください。",
 		LangSpanish:            "❌ No hay sesión activa. Envía un mensaje primero o cambia a una sesión.",
+		LangRussian:            "❌ Нет активной сессии. Сначала отправьте сообщение или переключитесь на сессию.",
 	},
 	MsgProviderNotSupported: {
 		LangEnglish:            "This agent does not support provider switching.",
@@ -1159,6 +1299,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前 Agent 不支援 Provider 切換。",
 		LangJapanese:           "このエージェントはプロバイダの切り替えをサポートしていません。",
 		LangSpanish:            "Este agente no soporta el cambio de proveedor.",
+		LangRussian:            "Этот агент не поддерживает переключение провайдеров.",
 	},
 	MsgProviderNone: {
 		LangEnglish:            "No provider configured. Using agent's default environment.\n\nAdd providers in `config.toml` or via `cc-connect provider add`.",
@@ -1166,6 +1307,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "未配置 Provider，使用 Agent 預設環境。\n\n可在 `config.toml` 中新增或使用 `cc-connect provider add` 命令。",
 		LangJapanese:           "プロバイダが設定されていません。エージェントのデフォルト環境を使用します。\n\n`config.toml` または `cc-connect provider add` でプロバイダを追加してください。",
 		LangSpanish:            "No hay proveedor configurado. Usando el entorno predeterminado del agente.\n\nAgregue proveedores en `config.toml` o mediante `cc-connect provider add`.",
+		LangRussian:            "Провайдер не настроен. Используется окружение агента по умолчанию.\n\nДобавьте провайдеров в `config.toml` или через `cc-connect provider add`.",
 	},
 	MsgProviderCurrent: {
 		LangEnglish:            "📡 Active provider: **%s**\n\nUse `/provider list` to see all, `/provider switch <name>` to switch.",
@@ -1173,6 +1315,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "📡 當前 Provider: **%s**\n\n使用 `/provider list` 查看全部，`/provider switch <名稱>` 切換。",
 		LangJapanese:           "📡 現在のプロバイダ: **%s**\n\n`/provider list` で一覧、`/provider switch <名前>` で切り替え。",
 		LangSpanish:            "📡 Proveedor activo: **%s**\n\nUse `/provider list` para ver todos, `/provider switch <nombre>` para cambiar.",
+		LangRussian:            "📡 Активный провайдер: **%s**\n\nИспользуйте `/provider list` для списка, `/provider switch <имя>` для переключения.",
 	},
 	MsgProviderListTitle: {
 		LangEnglish:            "📡 Providers\n\n",
@@ -1180,6 +1323,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "📡 Provider 列表\n\n",
 		LangJapanese:           "📡 プロバイダ一覧\n\n",
 		LangSpanish:            "📡 Proveedores\n\n",
+		LangRussian:            "📡 Провайдеры\n\n",
 	},
 	MsgProviderListEmpty: {
 		LangEnglish:            "No providers configured.\n\nAdd providers in `config.toml` or via `cc-connect provider add`.",
@@ -1187,6 +1331,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "未配置 Provider。\n\n可在 `config.toml` 中新增或使用 `cc-connect provider add` 命令。",
 		LangJapanese:           "プロバイダが設定されていません。\n\n`config.toml` または `cc-connect provider add` で追加してください。",
 		LangSpanish:            "No hay proveedores configurados.\n\nAgregue proveedores en `config.toml` o mediante `cc-connect provider add`.",
+		LangRussian:            "Провайдеры не настроены.\n\nДобавьте провайдеров в `config.toml` или через `cc-connect provider add`.",
 	},
 	MsgProviderSwitchHint: {
 		LangEnglish:            "`/provider switch <name>` to switch | `/provider clear` to reset",
@@ -1194,6 +1339,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "`/provider switch <名稱>` 切換 | `/provider clear` 清除",
 		LangJapanese:           "`/provider switch <名前>` で切り替え | `/provider clear` でリセット",
 		LangSpanish:            "`/provider switch <nombre>` para cambiar | `/provider clear` para restablecer",
+		LangRussian:            "`/provider switch <имя>` для переключения | `/provider clear` для сброса",
 	},
 	MsgProviderNotFound: {
 		LangEnglish:            "❌ Provider %q not found. Use `/provider list` to see available providers.",
@@ -1201,6 +1347,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 未找到 Provider %q。使用 `/provider list` 查看可用列表。",
 		LangJapanese:           "❌ プロバイダ %q が見つかりません。`/provider list` で一覧を確認してください。",
 		LangSpanish:            "❌ Proveedor %q no encontrado. Use `/provider list` para ver los disponibles.",
+		LangRussian:            "❌ Провайдер %q не найден. Используйте `/provider list` для просмотра доступных.",
 	},
 	MsgProviderSwitched: {
 		LangEnglish:            "✅ Provider switched to **%s**. New sessions will use this provider.",
@@ -1208,6 +1355,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ Provider 已切換為 **%s**，新會話將使用此 Provider。",
 		LangJapanese:           "✅ プロバイダを **%s** に切り替えました。新しいセッションで使用されます。",
 		LangSpanish:            "✅ Proveedor cambiado a **%s**. Las nuevas sesiones usarán este proveedor.",
+		LangRussian:            "✅ Провайдер переключён на **%s**. Новые сессии будут использовать этого провайдера.",
 	},
 	MsgProviderCleared: {
 		LangEnglish:            "✅ Provider cleared. New sessions will use the default provider.",
@@ -1215,6 +1363,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ Provider 已清除，新會話將使用預設 Provider。",
 		LangJapanese:           "✅ プロバイダをクリアしました。新しいセッションではデフォルトのプロバイダが使用されます。",
 		LangSpanish:            "✅ Proveedor eliminado. Las nuevas sesiones usarán el proveedor predeterminado.",
+		LangRussian:            "✅ Провайдер сброшен. Новые сессии будут использовать провайдера по умолчанию.",
 	},
 	MsgProviderAdded: {
 		LangEnglish:            "✅ Provider **%s** added.\n\nUse `/provider switch %s` to activate.",
@@ -1222,6 +1371,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ Provider **%s** 已新增。\n\n使用 `/provider switch %s` 啟用。",
 		LangJapanese:           "✅ プロバイダ **%s** を追加しました。\n\n`/provider switch %s` で有効化してください。",
 		LangSpanish:            "✅ Proveedor **%s** agregado.\n\nUse `/provider switch %s` para activarlo.",
+		LangRussian:            "✅ Провайдер **%s** добавлен.\n\nИспользуйте `/provider switch %s` для активации.",
 	},
 	MsgProviderAddUsage: {
 		LangEnglish: "Usage:\n\n" +
@@ -1244,6 +1394,10 @@ var messages = map[MsgKey]map[Language]string{
 			"`/provider add <nombre> <api_key> [base_url] [model]`\n\n" +
 			"O JSON:\n" +
 			"`/provider add {\"name\":\"relay\",\"api_key\":\"sk-xxx\",\"base_url\":\"https://...\",\"model\":\"...\"}`",
+		LangRussian: "Использование:\n\n" +
+			"`/provider add <имя> <api_key> [base_url] [model]`\n\n" +
+			"Или JSON:\n" +
+			"`/provider add {\"name\":\"relay\",\"api_key\":\"sk-xxx\",\"base_url\":\"https://...\",\"model\":\"...\"}`",
 	},
 	MsgProviderAddFailed: {
 		LangEnglish:            "❌ Failed to add provider: %v",
@@ -1251,6 +1405,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 新增 Provider 失敗: %v",
 		LangJapanese:           "❌ プロバイダの追加に失敗しました: %v",
 		LangSpanish:            "❌ Error al agregar proveedor: %v",
+		LangRussian:            "❌ Не удалось добавить провайдера: %v",
 	},
 	MsgProviderRemoved: {
 		LangEnglish:            "✅ Provider **%s** removed.",
@@ -1258,6 +1413,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ Provider **%s** 已移除。",
 		LangJapanese:           "✅ プロバイダ **%s** を削除しました。",
 		LangSpanish:            "✅ Proveedor **%s** eliminado.",
+		LangRussian:            "✅ Провайдер **%s** удалён.",
 	},
 	MsgProviderRemoveFailed: {
 		LangEnglish:            "❌ Failed to remove provider: %v",
@@ -1265,6 +1421,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 移除 Provider 失敗: %v",
 		LangJapanese:           "❌ プロバイダの削除に失敗しました: %v",
 		LangSpanish:            "❌ Error al eliminar proveedor: %v",
+		LangRussian:            "❌ Не удалось удалить провайдера: %v",
 	},
 	MsgVoiceNotEnabled: {
 		LangEnglish:            "🎙 Voice messages are not enabled. Please configure `[speech]` in config.toml.",
@@ -1272,6 +1429,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🎙 語音訊息未啟用，請在 config.toml 中配置 `[speech]` 部分。",
 		LangJapanese:           "🎙 音声メッセージは有効になっていません。config.toml で `[speech]` を設定してください。",
 		LangSpanish:            "🎙 Los mensajes de voz no están habilitados. Configure `[speech]` en config.toml.",
+		LangRussian:            "🎙 Голосовые сообщения не включены. Настройте `[speech]` в config.toml.",
 	},
 	MsgVoiceNoFFmpeg: {
 		LangEnglish:            "🎙 Voice message requires `ffmpeg` for format conversion. Please install ffmpeg.",
@@ -1279,6 +1437,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🎙 語音訊息需要 `ffmpeg` 進行格式轉換，請安裝 ffmpeg。",
 		LangJapanese:           "🎙 音声メッセージのフォーマット変換に `ffmpeg` が必要です。ffmpeg をインストールしてください。",
 		LangSpanish:            "🎙 Los mensajes de voz requieren `ffmpeg` para la conversión de formato. Instale ffmpeg.",
+		LangRussian:            "🎙 Для голосовых сообщений требуется `ffmpeg` для конвертации формата. Установите ffmpeg.",
 	},
 	MsgVoiceTranscribing: {
 		LangEnglish:            "🎙 Transcribing voice message...",
@@ -1286,6 +1445,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🎙 正在轉錄語音訊息...",
 		LangJapanese:           "🎙 音声メッセージを文字起こし中...",
 		LangSpanish:            "🎙 Transcribiendo mensaje de voz...",
+		LangRussian:            "🎙 Транскрибирую голосовое сообщение...",
 	},
 	MsgVoiceTranscribed: {
 		LangEnglish:            "🎙 %s",
@@ -1293,6 +1453,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🎙 %s",
 		LangJapanese:           "🎙 %s",
 		LangSpanish:            "🎙 %s",
+		LangRussian:            "🎙 %s",
 	},
 	MsgVoiceTranscribeFailed: {
 		LangEnglish:            "🎙 Voice transcription failed: %v",
@@ -1300,6 +1461,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🎙 語音轉文字失敗: %v",
 		LangJapanese:           "🎙 音声の文字起こしに失敗しました: %v",
 		LangSpanish:            "🎙 Error en la transcripción de voz: %v",
+		LangRussian:            "🎙 Ошибка транскрибации голоса: %v",
 	},
 	MsgVoiceEmpty: {
 		LangEnglish:            "🎙 Voice message was empty or could not be recognized.",
@@ -1307,6 +1469,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🎙 語音訊息為空或無法識別。",
 		LangJapanese:           "🎙 音声メッセージが空か、認識できませんでした。",
 		LangSpanish:            "🎙 El mensaje de voz estaba vacío o no se pudo reconocer.",
+		LangRussian:            "🎙 Голосовое сообщение пустое или не удалось распознать.",
 	},
 	MsgTTSNotEnabled: {
 		LangEnglish:            "TTS is not enabled. Please configure `[tts]` in config.toml.",
@@ -1314,6 +1477,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "TTS 未啟用，請在 config.toml 中配置 `[tts]` 部分。",
 		LangJapanese:           "TTS は有効になっていません。config.toml で `[tts]` を設定してください。",
 		LangSpanish:            "TTS no está habilitado. Configure `[tts]` en config.toml.",
+		LangRussian:            "TTS не включён. Настройте `[tts]` в config.toml.",
 	},
 	MsgTTSStatus: {
 		LangEnglish:            "TTS status: enabled=true, mode=%s, provider=%s",
@@ -1321,6 +1485,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "TTS 狀態：enabled=true，mode=%s，provider=%s",
 		LangJapanese:           "TTS 状態: enabled=true, mode=%s, provider=%s",
 		LangSpanish:            "Estado TTS: enabled=true, mode=%s, provider=%s",
+		LangRussian:            "Статус TTS: enabled=true, mode=%s, provider=%s",
 	},
 	MsgTTSSwitched: {
 		LangEnglish:            "TTS mode switched to: %s",
@@ -1328,6 +1493,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "TTS 已切換為 %s 模式",
 		LangJapanese:           "TTS モードを %s に切り替えました",
 		LangSpanish:            "Modo TTS cambiado a: %s",
+		LangRussian:            "Режим TTS переключён на: %s",
 	},
 	MsgTTSUsage: {
 		LangEnglish:            "Usage: /tts [always|voice_only]",
@@ -1335,6 +1501,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：/tts [always|voice_only]",
 		LangJapanese:           "使い方: /tts [always|voice_only]",
 		LangSpanish:            "Uso: /tts [always|voice_only]",
+		LangRussian:            "Использование: /tts [always|voice_only]",
 	},
 	MsgHeartbeatNotAvailable: {
 		LangEnglish:            "Heartbeat is not configured for this project.",
@@ -1342,6 +1509,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前項目未配置心跳。",
 		LangJapanese:           "このプロジェクトにはハートビートが設定されていません。",
 		LangSpanish:            "El heartbeat no está configurado para este proyecto.",
+		LangRussian:            "Heartbeat не настроен для этого проекта.",
 	},
 	MsgHeartbeatStatus: {
 		LangEnglish: "💓 Heartbeat Status\n\n" +
@@ -1389,6 +1557,15 @@ var messages = map[MsgKey]map[Language]string{
 			"Errores: %d\n" +
 			"Omitidos (ocupado): %d\n" +
 			"%s",
+		LangRussian: "💓 Статус Heartbeat\n\n" +
+			"Состояние: %s\n" +
+			"Интервал: %d мин\n" +
+			"Только в простое: %s\n" +
+			"Тихий: %s\n" +
+			"Запусков: %d\n" +
+			"Ошибок: %d\n" +
+			"Пропущено (занят): %d\n" +
+			"%s",
 	},
 	MsgHeartbeatPaused: {
 		LangEnglish:            "💓 Heartbeat paused.",
@@ -1396,6 +1573,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "💓 心跳已暫停。",
 		LangJapanese:           "💓 ハートビートを一時停止しました。",
 		LangSpanish:            "💓 Heartbeat pausado.",
+		LangRussian:            "💓 Heartbeat приостановлен.",
 	},
 	MsgHeartbeatResumed: {
 		LangEnglish:            "💓 Heartbeat resumed.",
@@ -1403,6 +1581,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "💓 心跳已恢復。",
 		LangJapanese:           "💓 ハートビートを再開しました。",
 		LangSpanish:            "💓 Heartbeat reanudado.",
+		LangRussian:            "💓 Heartbeat возобновлён.",
 	},
 	MsgHeartbeatInterval: {
 		LangEnglish:            "💓 Heartbeat interval changed to %d minutes.",
@@ -1410,6 +1589,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "💓 心跳間隔已調整為 %d 分鐘。",
 		LangJapanese:           "💓 ハートビート間隔を %d 分に変更しました。",
 		LangSpanish:            "💓 Intervalo del heartbeat cambiado a %d minutos.",
+		LangRussian:            "💓 Интервал heartbeat изменён на %d минут.",
 	},
 	MsgHeartbeatTriggered: {
 		LangEnglish:            "💓 Heartbeat triggered.",
@@ -1417,6 +1597,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "💓 心跳已觸發。",
 		LangJapanese:           "💓 ハートビートをトリガーしました。",
 		LangSpanish:            "💓 Heartbeat activado.",
+		LangRussian:            "💓 Heartbeat запущен.",
 	},
 	MsgHeartbeatUsage: {
 		LangEnglish:            "Usage: /heartbeat [status|pause|resume|run|interval <mins>]",
@@ -1424,6 +1605,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法: /heartbeat [status|pause|resume|run|interval <分鐘>]",
 		LangJapanese:           "使い方: /heartbeat [status|pause|resume|run|interval <分>]",
 		LangSpanish:            "Uso: /heartbeat [status|pause|resume|run|interval <minutos>]",
+		LangRussian:            "Использование: /heartbeat [status|pause|resume|run|interval <минуты>]",
 	},
 	MsgHeartbeatInvalidMins: {
 		LangEnglish:            "Invalid interval. Please provide a positive number of minutes.",
@@ -1431,6 +1613,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "無效的間隔。請輸入正整數的分鐘數。",
 		LangJapanese:           "無効な間隔です。正の整数を分で指定してください。",
 		LangSpanish:            "Intervalo inválido. Proporcione un número positivo de minutos.",
+		LangRussian:            "Недопустимый интервал. Укажите положительное число минут.",
 	},
 	MsgCronNotAvailable: {
 		LangEnglish:            "Cron scheduler is not available.",
@@ -1438,6 +1621,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "定時任務調度器未啟用。",
 		LangJapanese:           "スケジューラは利用できません。",
 		LangSpanish:            "El programador de tareas no está disponible.",
+		LangRussian:            "Планировщик задач недоступен.",
 	},
 	MsgCronUsage: {
 		LangEnglish:            "Usage:\n/cron add <min> <hour> <day> <month> <weekday> <prompt>\n/cron list\n/cron del <id>\n/cron enable <id>\n/cron disable <id>\n/cron setup — write cron instructions to agent memory file",
@@ -1445,6 +1629,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：\n/cron add <分> <時> <日> <月> <週> <任務描述>\n/cron list\n/cron del <id>\n/cron enable <id>\n/cron disable <id>\n/cron setup — 將定時任務指令寫入 agent 記憶檔案",
 		LangJapanese:           "使い方:\n/cron add <分> <時> <日> <月> <曜日> <タスク内容>\n/cron list\n/cron del <id>\n/cron enable <id>\n/cron disable <id>\n/cron setup — cronの指示をエージェントのメモリファイルに書き込む",
 		LangSpanish:            "Uso:\n/cron add <min> <hora> <día> <mes> <día_semana> <tarea>\n/cron list\n/cron del <id>\n/cron enable <id>\n/cron disable <id>\n/cron setup — escribir instrucciones de cron en el archivo de memoria del agente",
+		LangRussian:            "Использование:\n/cron add <мин> <час> <день> <месяц> <день_недели> <задача>\n/cron list\n/cron del <id>\n/cron enable <id>\n/cron disable <id>\n/cron setup — записать инструкции cron в файл памяти агента",
 	},
 	MsgCronAddUsage: {
 		LangEnglish:            "Usage: /cron add <min> <hour> <day> <month> <weekday> <prompt>\nExample: /cron add 0 6 * * * Collect GitHub trending data and send me a summary",
@@ -1452,6 +1637,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：/cron add <分> <時> <日> <月> <週> <任務描述>\n範例：/cron add 0 6 * * * 收集 GitHub Trending 資料整理成簡報發給我",
 		LangJapanese:           "使い方: /cron add <分> <時> <日> <月> <曜日> <タスク内容>\n例: /cron add 0 6 * * * GitHub Trending を収集してまとめを送って",
 		LangSpanish:            "Uso: /cron add <min> <hora> <día> <mes> <día_semana> <tarea>\nEjemplo: /cron add 0 6 * * * Recopilar datos de GitHub Trending y enviarme un resumen",
+		LangRussian:            "Использование: /cron add <мин> <час> <день> <месяц> <день_недели> <задача>\nПример: /cron add 0 6 * * * Собрать данные GitHub Trending и отправить мне сводку",
 	},
 	MsgCronAdded: {
 		LangEnglish:            "✅ Cron job created\nID: `%s`\nSchedule: `%s`\nPrompt: %s",
@@ -1459,6 +1645,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 定時任務已建立\nID: `%s`\n調度: `%s`\n內容: %s",
 		LangJapanese:           "✅ スケジュールタスクを作成しました\nID: `%s`\nスケジュール: `%s`\n内容: %s",
 		LangSpanish:            "✅ Tarea programada creada\nID: `%s`\nProgramación: `%s`\nContenido: %s",
+		LangRussian:            "✅ Задача cron создана\nID: `%s`\nРасписание: `%s`\nСодержание: %s",
 	},
 	MsgCronAddedExec: {
 		LangEnglish:            "✅ Shell cron job created\nID: `%s`\nSchedule: `%s`\nCommand: `%s`",
@@ -1466,6 +1653,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ Shell 定時任務已建立\nID: `%s`\n調度: `%s`\n命令: `%s`",
 		LangJapanese:           "✅ Shell スケジュールタスクを作成しました\nID: `%s`\nスケジュール: `%s`\nコマンド: `%s`",
 		LangSpanish:            "✅ Tarea shell programada creada\nID: `%s`\nProgramación: `%s`\nComando: `%s`",
+		LangRussian:            "✅ Shell-задача cron создана\nID: `%s`\nРасписание: `%s`\nКоманда: `%s`",
 	},
 	MsgCronAddExecUsage: {
 		LangEnglish:            "Usage: /cron addexec <min> <hour> <day> <month> <weekday> <shell command>\nExample: /cron addexec 0 6 * * * df -h",
@@ -1473,6 +1661,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：/cron addexec <分> <時> <日> <月> <週> <shell 命令>\n範例：/cron addexec 0 6 * * * df -h",
 		LangJapanese:           "使い方: /cron addexec <分> <時> <日> <月> <曜日> <シェルコマンド>\n例: /cron addexec 0 6 * * * df -h",
 		LangSpanish:            "Uso: /cron addexec <min> <hora> <día> <mes> <día_semana> <comando shell>\nEjemplo: /cron addexec 0 6 * * * df -h",
+		LangRussian:            "Использование: /cron addexec <мин> <час> <день> <месяц> <день_недели> <shell-команда>\nПример: /cron addexec 0 6 * * * df -h",
 	},
 	MsgCronEmpty: {
 		LangEnglish:            "No scheduled tasks.",
@@ -1480,6 +1669,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "暫無定時任務。",
 		LangJapanese:           "スケジュールタスクはありません。",
 		LangSpanish:            "No hay tareas programadas.",
+		LangRussian:            "Нет запланированных задач.",
 	},
 	MsgCronListTitle: {
 		LangEnglish:            "⏰ Scheduled Tasks (%d)",
@@ -1487,6 +1677,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⏰ 定時任務 (%d)",
 		LangJapanese:           "⏰ スケジュールタスク (%d)",
 		LangSpanish:            "⏰ Tareas programadas (%d)",
+		LangRussian:            "⏰ Запланированные задачи (%d)",
 	},
 	MsgCronListFooter: {
 		LangEnglish:            "`/cron del <id>` to remove · `/cron enable/disable <id>` to toggle",
@@ -1494,6 +1685,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "`/cron del <id>` 刪除 · `/cron enable/disable <id>` 啟停",
 		LangJapanese:           "`/cron del <id>` で削除 · `/cron enable/disable <id>` で切替",
 		LangSpanish:            "`/cron del <id>` para eliminar · `/cron enable/disable <id>` para activar/desactivar",
+		LangRussian:            "`/cron del <id>` для удаления · `/cron enable/disable <id>` для вкл/выкл",
 	},
 	MsgCronDelUsage: {
 		LangEnglish:            "Usage: /cron del <id>",
@@ -1501,6 +1693,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：/cron del <id>",
 		LangJapanese:           "使い方: /cron del <id>",
 		LangSpanish:            "Uso: /cron del <id>",
+		LangRussian:            "Использование: /cron del <id>",
 	},
 	MsgCronDeleted: {
 		LangEnglish:            "✅ Cron job `%s` deleted.",
@@ -1508,6 +1701,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 定時任務 `%s` 已刪除。",
 		LangJapanese:           "✅ スケジュールタスク `%s` を削除しました。",
 		LangSpanish:            "✅ Tarea programada `%s` eliminada.",
+		LangRussian:            "✅ Задача cron `%s` удалена.",
 	},
 	MsgCronNotFound: {
 		LangEnglish:            "❌ Cron job `%s` not found.",
@@ -1515,6 +1709,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 定時任務 `%s` 未找到。",
 		LangJapanese:           "❌ スケジュールタスク `%s` が見つかりません。",
 		LangSpanish:            "❌ Tarea programada `%s` no encontrada.",
+		LangRussian:            "❌ Задача cron `%s` не найдена.",
 	},
 	MsgCronEnabled: {
 		LangEnglish:            "✅ Cron job `%s` enabled.",
@@ -1522,6 +1717,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 定時任務 `%s` 已啟用。",
 		LangJapanese:           "✅ スケジュールタスク `%s` を有効にしました。",
 		LangSpanish:            "✅ Tarea programada `%s` habilitada.",
+		LangRussian:            "✅ Задача cron `%s` включена.",
 	},
 	MsgCronDisabled: {
 		LangEnglish:            "⏸ Cron job `%s` disabled.",
@@ -1529,6 +1725,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⏸ 定時任務 `%s` 已暫停。",
 		LangJapanese:           "⏸ スケジュールタスク `%s` を無効にしました。",
 		LangSpanish:            "⏸ Tarea programada `%s` deshabilitada.",
+		LangRussian:            "⏸ Задача cron `%s` отключена.",
 	},
 	MsgStatusTitle: {
 		LangEnglish: "cc-connect Status\n\n" +
@@ -1566,6 +1763,13 @@ var messages = map[MsgKey]map[Language]string{
 			"Tiempo activo: %s\n" +
 			"Idioma: %s\n" +
 			"%s" + "%s" + "%s" + "%s",
+		LangRussian: "Статус cc-connect\n\n" +
+			"Проект: %s\n" +
+			"Агент: %s\n" +
+			"Платформы: %s\n" +
+			"Время работы: %s\n" +
+			"Язык: %s\n" +
+			"%s" + "%s" + "%s" + "%s",
 	},
 	MsgModelCurrent: {
 		LangEnglish:            "Current model: %s",
@@ -1573,6 +1777,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前模型: %s",
 		LangJapanese:           "現在のモデル: %s",
 		LangSpanish:            "Modelo actual: %s",
+		LangRussian:            "Текущая модель: %s",
 	},
 	MsgModelChanged: {
 		LangEnglish:            "Model switched to `%s`. New sessions will use this model.",
@@ -1580,6 +1785,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "模型已切換為 `%s`，新會話將使用此模型。",
 		LangJapanese:           "モデルを `%s` に切り替えました。新しいセッションで使用されます。",
 		LangSpanish:            "Modelo cambiado a `%s`. Las nuevas sesiones usarán este modelo.",
+		LangRussian:            "Модель переключена на `%s`. Новые сессии будут использовать эту модель.",
 	},
 	MsgModelNotSupported: {
 		LangEnglish:            "This agent does not support model switching.",
@@ -1587,6 +1793,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前 Agent 不支援模型切換。",
 		LangJapanese:           "このエージェントはモデルの切り替えをサポートしていません。",
 		LangSpanish:            "Este agente no soporta el cambio de modelo.",
+		LangRussian:            "Этот агент не поддерживает переключение модели.",
 	},
 	MsgReasoningCurrent: {
 		LangEnglish:            "Current reasoning effort: %s",
@@ -1594,6 +1801,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前推理強度: %s",
 		LangJapanese:           "現在の推論強度: %s",
 		LangSpanish:            "Esfuerzo de razonamiento actual: %s",
+		LangRussian:            "Текущий уровень рассуждений: %s",
 	},
 	MsgReasoningChanged: {
 		LangEnglish:            "Reasoning effort switched to `%s`. New sessions will use this setting.",
@@ -1601,6 +1809,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "推理強度已切換為 `%s`，新會話將使用此設定。",
 		LangJapanese:           "推論強度を `%s` に切り替えました。新しいセッションで使用されます。",
 		LangSpanish:            "Esfuerzo de razonamiento cambiado a `%s`. Las nuevas sesiones usarán esta configuración.",
+		LangRussian:            "Уровень рассуждений переключён на `%s`. Новые сессии будут использовать эту настройку.",
 	},
 	MsgReasoningNotSupported: {
 		LangEnglish:            "This agent does not support reasoning effort switching.",
@@ -1608,6 +1817,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前 Agent 不支援推理強度切換。",
 		LangJapanese:           "このエージェントは推論強度の切り替えをサポートしていません。",
 		LangSpanish:            "Este agente no soporta el cambio de esfuerzo de razonamiento.",
+		LangRussian:            "Этот агент не поддерживает переключение уровня рассуждений.",
 	},
 	MsgMemoryNotSupported: {
 		LangEnglish:            "This agent does not support memory files.",
@@ -1615,6 +1825,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前 Agent 不支援記憶檔案。",
 		LangJapanese:           "このエージェントはメモリファイルをサポートしていません。",
 		LangSpanish:            "Este agente no soporta archivos de memoria.",
+		LangRussian:            "Этот агент не поддерживает файлы памяти.",
 	},
 	MsgMemoryShowProject: {
 		LangEnglish:            "📝 **Project Memory** (`%s`)\n\n%s",
@@ -1622,6 +1833,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "📝 **項目記憶** (`%s`)\n\n%s",
 		LangJapanese:           "📝 **プロジェクトメモリ** (`%s`)\n\n%s",
 		LangSpanish:            "📝 **Memoria del proyecto** (`%s`)\n\n%s",
+		LangRussian:            "📝 **Память проекта** (`%s`)\n\n%s",
 	},
 	MsgMemoryShowGlobal: {
 		LangEnglish:            "📝 **Global Memory** (`%s`)\n\n%s",
@@ -1629,6 +1841,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "📝 **全域記憶** (`%s`)\n\n%s",
 		LangJapanese:           "📝 **グローバルメモリ** (`%s`)\n\n%s",
 		LangSpanish:            "📝 **Memoria global** (`%s`)\n\n%s",
+		LangRussian:            "📝 **Глобальная память** (`%s`)\n\n%s",
 	},
 	MsgMemoryEmpty: {
 		LangEnglish:            "📝 `%s`\n\n(empty — no content yet)",
@@ -1636,6 +1849,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "📝 `%s`\n\n（空 — 尚無內容）",
 		LangJapanese:           "📝 `%s`\n\n（空 — まだ内容がありません）",
 		LangSpanish:            "📝 `%s`\n\n(vacío — aún sin contenido)",
+		LangRussian:            "📝 `%s`\n\n(пусто — содержимого пока нет)",
 	},
 	MsgMemoryAdded: {
 		LangEnglish:            "✅ Added to `%s`",
@@ -1643,6 +1857,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 已追加到 `%s`",
 		LangJapanese:           "✅ `%s` に追加しました",
 		LangSpanish:            "✅ Agregado a `%s`",
+		LangRussian:            "✅ Добавлено в `%s`",
 	},
 	MsgMemoryAddFailed: {
 		LangEnglish:            "❌ Failed to write memory file: %v",
@@ -1650,6 +1865,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 寫入記憶檔案失敗: %v",
 		LangJapanese:           "❌ メモリファイルの書き込みに失敗しました: %v",
 		LangSpanish:            "❌ Error al escribir archivo de memoria: %v",
+		LangRussian:            "❌ Не удалось записать файл памяти: %v",
 	},
 	MsgUsageNotSupported: {
 		LangEnglish:            "Current agent does not support `/usage`.",
@@ -1657,6 +1873,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "目前 Agent 不支援 `/usage`。",
 		LangJapanese:           "現在のエージェントは `/usage` をサポートしていません。",
 		LangSpanish:            "El agente actual no admite `/usage`.",
+		LangRussian:            "Текущий агент не поддерживает `/usage`.",
 	},
 	MsgUsageFetchFailed: {
 		LangEnglish:            "Failed to fetch usage: %v",
@@ -1664,6 +1881,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "取得 usage 失敗：%v",
 		LangJapanese:           "usage の取得に失敗しました: %v",
 		LangSpanish:            "No se pudo obtener usage: %v",
+		LangRussian:            "Не удалось получить данные об использовании: %v",
 	},
 	MsgMemoryAddUsage: {
 		LangEnglish: "Usage:\n" +
@@ -1691,6 +1909,11 @@ var messages = map[MsgKey]map[Language]string{
 			"`/memory add <texto>` — agregar a memoria del proyecto\n" +
 			"`/memory global` — ver memoria global\n" +
 			"`/memory global add <texto>` — agregar a memoria global",
+		LangRussian: "Использование:\n" +
+			"`/memory` — показать память проекта\n" +
+			"`/memory add <текст>` — добавить в память проекта\n" +
+			"`/memory global` — показать глобальную память\n" +
+			"`/memory global add <текст>` — добавить в глобальную память",
 	},
 	MsgCompressNotSupported: {
 		LangEnglish:            "This agent does not support context compression.",
@@ -1698,6 +1921,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前 Agent 不支援上下文壓縮。可以使用 `/new` 開始新會話。",
 		LangJapanese:           "このエージェントはコンテキスト圧縮をサポートしていません。`/new` で新しいセッションを開始できます。",
 		LangSpanish:            "Este agente no soporta la compresión de contexto. Puede usar `/new` para iniciar una nueva sesión.",
+		LangRussian:            "Этот агент не поддерживает сжатие контекста. Используйте `/new` для создания новой сессии.",
 	},
 	MsgCompressing: {
 		LangEnglish:            "🗜 Compressing context...",
@@ -1705,6 +1929,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🗜 正在壓縮上下文...",
 		LangJapanese:           "🗜 コンテキストを圧縮中...",
 		LangSpanish:            "🗜 Comprimiendo contexto...",
+		LangRussian:            "🗜 Сжимаю контекст...",
 	},
 	MsgCompressNoSession: {
 		LangEnglish:            "No active session to compress. Send a message first.",
@@ -1712,6 +1937,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "沒有活躍的會話可以壓縮。請先發送一條訊息。",
 		LangJapanese:           "圧縮するアクティブなセッションがありません。まずメッセージを送信してください。",
 		LangSpanish:            "No hay sesión activa para comprimir. Envíe un mensaje primero.",
+		LangRussian:            "Нет активной сессии для сжатия. Сначала отправьте сообщение.",
 	},
 	MsgCompressDone: {
 		LangEnglish:            "✅ Context compressed.",
@@ -1719,6 +1945,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 上下文壓縮完成。",
 		LangJapanese:           "✅ コンテキスト圧縮完了。",
 		LangSpanish:            "✅ Contexto comprimido.",
+		LangRussian:            "✅ Контекст сжат.",
 	},
 
 	// Inline strings for engine.go commands
@@ -1728,6 +1955,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "權限模式: %s\n",
 		LangJapanese:           "権限モード: %s\n",
 		LangSpanish:            "Modo: %s\n",
+		LangRussian:            "Режим: %s\n",
 	},
 	MsgStatusSession: {
 		LangEnglish:            "Session: %s (messages: %d)\n",
@@ -1735,6 +1963,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前會話: %s (訊息: %d)\n",
 		LangJapanese:           "セッション: %s (メッセージ: %d)\n",
 		LangSpanish:            "Sesión: %s (mensajes: %d)\n",
+		LangRussian:            "Сессия: %s (сообщений: %d)\n",
 	},
 	MsgStatusCron: {
 		LangEnglish:            "Cron jobs: %d (enabled: %d)\n",
@@ -1742,6 +1971,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "定時任務: %d (啟用: %d)\n",
 		LangJapanese:           "スケジュールタスク: %d (有効: %d)\n",
 		LangSpanish:            "Tareas programadas: %d (habilitadas: %d)\n",
+		LangRussian:            "Задачи cron: %d (активных: %d)\n",
 	},
 	MsgStatusQuiet: {
 		LangEnglish:            "Quiet mode: %s\n",
@@ -1749,6 +1979,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "安靜模式: %s\n",
 		LangJapanese:           "出力抑制モード: %s\n",
 		LangSpanish:            "Modo silencioso: %s\n",
+		LangRussian:            "Тихий режим: %s\n",
 	},
 	MsgStatusSessionKey: {
 		LangEnglish:            "Session Key: `%s`\n",
@@ -1756,6 +1987,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "會話 Key: `%s`\n",
 		LangJapanese:           "セッションキー: `%s`\n",
 		LangSpanish:            "Clave de sesión: `%s`\n",
+		LangRussian:            "Ключ сессии: `%s`\n",
 	},
 	MsgQuietOnShort: {
 		LangEnglish:            "ON",
@@ -1763,6 +1995,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "開啟",
 		LangJapanese:           "ON",
 		LangSpanish:            "Activado",
+		LangRussian:            "ВКЛ",
 	},
 	MsgQuietOffShort: {
 		LangEnglish:            "OFF",
@@ -1770,6 +2003,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "關閉",
 		LangJapanese:           "OFF",
 		LangSpanish:            "Desactivado",
+		LangRussian:            "ВЫКЛ",
 	},
 	MsgModelDefault: {
 		LangEnglish:            "Current model: (not set, using agent default)\n",
@@ -1777,6 +2011,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前模型: (未設置，使用 Agent 預設值)\n",
 		LangJapanese:           "現在のモデル: (未設定、エージェントのデフォルトを使用)\n",
 		LangSpanish:            "Modelo actual: (no configurado, usando predeterminado del agente)\n",
+		LangRussian:            "Текущая модель: (не задана, используется модель агента по умолчанию)\n",
 	},
 	MsgModelListTitle: {
 		LangEnglish:            "Available models:\n",
@@ -1784,6 +2019,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "可用模型:\n",
 		LangJapanese:           "利用可能なモデル:\n",
 		LangSpanish:            "Modelos disponibles:\n",
+		LangRussian:            "Доступные модели:\n",
 	},
 	MsgModelUsage: {
 		LangEnglish:            "Usage: `/model <number>` or `/model <model_name>`",
@@ -1791,6 +2027,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法: `/model <序號>` 或 `/model <模型名>`",
 		LangJapanese:           "使い方: `/model <番号>` または `/model <モデル名>`",
 		LangSpanish:            "Uso: `/model <número>` o `/model <nombre_modelo>`",
+		LangRussian:            "Использование: `/model <номер>` или `/model <имя_модели>`",
 	},
 	MsgReasoningDefault: {
 		LangEnglish:            "Current reasoning effort: (not set, using Codex default)\n",
@@ -1798,6 +2035,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前推理強度: (未設置，使用 Codex 預設值)\n",
 		LangJapanese:           "現在の推論強度: (未設定、Codex のデフォルトを使用)\n",
 		LangSpanish:            "Esfuerzo de razonamiento actual: (no configurado, usando el valor predeterminado de Codex)\n",
+		LangRussian:            "Текущий уровень рассуждений: (не задан, используется значение Codex по умолчанию)\n",
 	},
 	MsgReasoningListTitle: {
 		LangEnglish:            "Available reasoning levels:\n",
@@ -1805,6 +2043,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "可用推理強度:\n",
 		LangJapanese:           "利用可能な推論強度:\n",
 		LangSpanish:            "Niveles de razonamiento disponibles:\n",
+		LangRussian:            "Доступные уровни рассуждений:\n",
 	},
 	MsgReasoningUsage: {
 		LangEnglish:            "Usage: `/reasoning <number>` or `/reasoning <low|medium|high|xhigh>`",
@@ -1812,6 +2051,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法: `/reasoning <序號>` 或 `/reasoning <low|medium|high|xhigh>`",
 		LangJapanese:           "使い方: `/reasoning <番号>` または `/reasoning <low|medium|high|xhigh>`",
 		LangSpanish:            "Uso: `/reasoning <número>` o `/reasoning <low|medium|high|xhigh>`",
+		LangRussian:            "Использование: `/reasoning <номер>` или `/reasoning <low|medium|high|xhigh>`",
 	},
 	MsgModeUsage: {
 		LangEnglish:            "\nUse `/mode <name>` to switch.\nAvailable: `default` / `edit` / `plan` / `yolo`",
@@ -1819,118 +2059,147 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "\n使用 `/mode <名稱>` 切換模式\n可用值: `default` / `edit` / `plan` / `yolo`",
 		LangJapanese:           "\n`/mode <名前>` で切り替え\n選択肢: `default` / `edit` / `plan` / `yolo`",
 		LangSpanish:            "\nUse `/mode <nombre>` para cambiar.\nDisponibles: `default` / `edit` / `plan` / `yolo`",
+		LangRussian:            "\nИспользуйте `/mode <имя>` для переключения.\nДоступные: `default` / `edit` / `plan` / `yolo`",
 	},
 	MsgLangSelectPlaceholder: {
 		LangEnglish: "Select language", LangChinese: "选择语言", LangTraditionalChinese: "選擇語言",
 		LangJapanese: "言語を選択", LangSpanish: "Seleccionar idioma",
+		LangRussian: "Выберите язык",
 	},
 	MsgModelSelectPlaceholder: {
 		LangEnglish: "Select model", LangChinese: "选择模型", LangTraditionalChinese: "選擇模型",
 		LangJapanese: "モデルを選択", LangSpanish: "Seleccionar modelo",
+		LangRussian: "Выберите модель",
 	},
 	MsgReasoningSelectPlaceholder: {
 		LangEnglish: "Select reasoning level", LangChinese: "选择推理强度", LangTraditionalChinese: "選擇推理強度",
 		LangJapanese: "推論強度を選択", LangSpanish: "Seleccionar nivel de razonamiento",
+		LangRussian: "Выберите уровень рассуждений",
 	},
 	MsgModeSelectPlaceholder: {
 		LangEnglish: "Select mode", LangChinese: "选择模式", LangTraditionalChinese: "選擇模式",
 		LangJapanese: "モードを選択", LangSpanish: "Seleccionar modo",
+		LangRussian: "Выберите режим",
 	},
 	MsgProviderSelectPlaceholder: {
 		LangEnglish: "Select provider", LangChinese: "选择 Provider", LangTraditionalChinese: "選擇 Provider",
 		LangJapanese: "プロバイダーを選択", LangSpanish: "Seleccionar proveedor",
+		LangRussian: "Выберите провайдера",
 	},
 	MsgCardBack: {
 		LangEnglish: "← Back", LangChinese: "← 返回", LangTraditionalChinese: "← 返回",
 		LangJapanese: "← 戻る", LangSpanish: "← Volver",
+		LangRussian: "← Назад",
 	},
 	MsgCardPrev: {
 		LangEnglish: "← Prev", LangChinese: "← 上一页", LangTraditionalChinese: "← 上一頁",
 		LangJapanese: "← 前へ", LangSpanish: "← Anterior",
+		LangRussian: "← Пред.",
 	},
 	MsgCardNext: {
 		LangEnglish: "Next →", LangChinese: "下一页 →", LangTraditionalChinese: "下一頁 →",
 		LangJapanese: "次へ →", LangSpanish: "Siguiente →",
+		LangRussian: "След. →",
 	},
 	MsgCardTitleStatus: {
 		LangEnglish: "cc-connect Status", LangChinese: "cc-connect 状态", LangTraditionalChinese: "cc-connect 狀態",
 		LangJapanese: "cc-connect ステータス", LangSpanish: "Estado de cc-connect",
+		LangRussian: "Статус cc-connect",
 	},
 	MsgCardTitleLanguage: {
 		LangEnglish: "Language", LangChinese: "语言", LangTraditionalChinese: "語言",
 		LangJapanese: "言語", LangSpanish: "Idioma",
+		LangRussian: "Язык",
 	},
 	MsgCardTitleModel: {
 		LangEnglish: "Model", LangChinese: "模型", LangTraditionalChinese: "模型",
 		LangJapanese: "モデル", LangSpanish: "Modelo",
+		LangRussian: "Модель",
 	},
 	MsgCardTitleReasoning: {
 		LangEnglish: "Reasoning", LangChinese: "推理强度", LangTraditionalChinese: "推理強度",
 		LangJapanese: "推論強度", LangSpanish: "Razonamiento",
+		LangRussian: "Рассуждение",
 	},
 	MsgCardTitleMode: {
 		LangEnglish: "Permission Mode", LangChinese: "权限模式", LangTraditionalChinese: "權限模式",
 		LangJapanese: "権限モード", LangSpanish: "Modo de permisos",
+		LangRussian: "Режим разрешений",
 	},
 	MsgCardTitleSessions: {
 		LangEnglish: "%s Sessions (%d)", LangChinese: "%s 会话列表 (%d)", LangTraditionalChinese: "%s 會話列表 (%d)",
 		LangJapanese: "%s セッション (%d)", LangSpanish: "Sesiones de %s (%d)",
+		LangRussian: "Сессии %s (%d)",
 	},
 	MsgCardTitleSessionsPaged: {
 		LangEnglish: "%s Sessions (%d) — %d/%d", LangChinese: "%s 会话列表 (%d) · 第 %d/%d 页", LangTraditionalChinese: "%s 會話列表 (%d) · 第 %d/%d 頁",
 		LangJapanese: "%s セッション (%d) · %d/%d ページ", LangSpanish: "Sesiones de %s (%d) · Página %d/%d",
+		LangRussian: "Сессии %s (%d) · Стр. %d/%d",
 	},
 	MsgCardTitleCurrentSession: {
 		LangEnglish: "Current Session", LangChinese: "当前会话", LangTraditionalChinese: "當前會話",
 		LangJapanese: "現在のセッション", LangSpanish: "Sesión actual",
+		LangRussian: "Текущая сессия",
 	},
 	MsgCardTitleHistory: {
 		LangEnglish: "History", LangChinese: "历史记录", LangTraditionalChinese: "歷史記錄",
 		LangJapanese: "履歴", LangSpanish: "Historial",
+		LangRussian: "История",
 	},
 	MsgCardTitleHistoryLast: {
 		LangEnglish: "History (last %d)", LangChinese: "历史记录（最近 %d 条）", LangTraditionalChinese: "歷史記錄（最近 %d 條）",
 		LangJapanese: "履歴（直近 %d 件）", LangSpanish: "Historial (últimos %d)",
+		LangRussian: "История (последние %d)",
 	},
 	MsgCardTitleProvider: {
 		LangEnglish: "Provider", LangChinese: "Provider", LangTraditionalChinese: "Provider",
 		LangJapanese: "プロバイダー", LangSpanish: "Proveedor",
+		LangRussian: "Провайдер",
 	},
 	MsgCardTitleCron: {
 		LangEnglish: "Cron", LangChinese: "定时任务", LangTraditionalChinese: "定時任務",
 		LangJapanese: "スケジュールタスク", LangSpanish: "Tareas programadas",
+		LangRussian: "Cron",
 	},
 	MsgCardTitleHeartbeat: {
 		LangEnglish: "Heartbeat", LangChinese: "心跳", LangTraditionalChinese: "心跳",
 		LangJapanese: "ハートビート", LangSpanish: "Heartbeat",
+		LangRussian: "Heartbeat",
 	},
 	MsgCardTitleCommands: {
 		LangEnglish: "Commands", LangChinese: "命令", LangTraditionalChinese: "命令",
 		LangJapanese: "コマンド", LangSpanish: "Comandos",
+		LangRussian: "Команды",
 	},
 	MsgCardTitleAlias: {
 		LangEnglish: "Alias", LangChinese: "别名", LangTraditionalChinese: "別名",
 		LangJapanese: "エイリアス", LangSpanish: "Alias",
+		LangRussian: "Алиасы",
 	},
 	MsgCardTitleConfig: {
 		LangEnglish: "Config", LangChinese: "配置", LangTraditionalChinese: "配置",
 		LangJapanese: "設定", LangSpanish: "Configuración",
+		LangRussian: "Настройки",
 	},
 	MsgCardTitleSkills: {
 		LangEnglish: "Skills", LangChinese: "Skills", LangTraditionalChinese: "Skills",
 		LangJapanese: "スキル", LangSpanish: "Skills",
+		LangRussian: "Навыки",
 	},
 	MsgCardTitleDoctor: {
 		LangEnglish: "Doctor", LangChinese: "系统诊断", LangTraditionalChinese: "系統診斷",
 		LangJapanese: "診断", LangSpanish: "Diagnóstico",
+		LangRussian: "Диагностика",
 	},
 	MsgCardTitleVersion: {
 		LangEnglish: "Version", LangChinese: "版本", LangTraditionalChinese: "版本",
 		LangJapanese: "バージョン", LangSpanish: "Versión",
+		LangRussian: "Версия",
 	},
 	MsgCardTitleUpgrade: {
 		LangEnglish: "Upgrade", LangChinese: "升级", LangTraditionalChinese: "升級",
 		LangJapanese: "アップグレード", LangSpanish: "Actualización",
+		LangRussian: "Обновление",
 	},
 	MsgListItem: {
 		LangEnglish:            "%s **%d.** %s · **%d** msgs · %s",
@@ -1938,30 +2207,37 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "%s **%d.** %s · **%d** 則訊息 · %s",
 		LangJapanese:           "%s **%d.** %s · **%d** 件のメッセージ · %s",
 		LangSpanish:            "%s **%d.** %s · **%d** mensajes · %s",
+		LangRussian:            "%s **%d.** %s · **%d** сообщ. · %s",
 	},
 	MsgListEmptySummary: {
 		LangEnglish: "(empty)", LangChinese: "（空）", LangTraditionalChinese: "（空）",
 		LangJapanese: "（空）", LangSpanish: "(vacío)",
+		LangRussian: "(пусто)",
 	},
 	MsgCronIDLabel: {
 		LangEnglish: "ID: %s\n", LangChinese: "ID：%s\n", LangTraditionalChinese: "ID：%s\n",
 		LangJapanese: "ID: %s\n", LangSpanish: "ID: %s\n",
+		LangRussian: "ID: %s\n",
 	},
 	MsgCronFailedSuffix: {
 		LangEnglish: " (failed: %s)", LangChinese: "（失败：%s）", LangTraditionalChinese: "（失敗：%s）",
 		LangJapanese: "（失敗: %s）", LangSpanish: " (falló: %s)",
+		LangRussian: " (ошибка: %s)",
 	},
 	MsgCommandsTagAgent: {
 		LangEnglish: " [agent]", LangChinese: " [代理]", LangTraditionalChinese: " [代理]",
 		LangJapanese: " [エージェント]", LangSpanish: " [agente]",
+		LangRussian: " [агент]",
 	},
 	MsgCommandsTagShell: {
 		LangEnglish: " [shell]", LangChinese: " [终端]", LangTraditionalChinese: " [終端]",
 		LangJapanese: " [シェル]", LangSpanish: " [shell]",
+		LangRussian: " [shell]",
 	},
 	MsgUpgradeTimeoutSuffix: {
 		LangEnglish: " (timeout)", LangChinese: "（超时）", LangTraditionalChinese: "（逾時）",
 		LangJapanese: "（タイムアウト）", LangSpanish: " (tiempo de espera agotado)",
+		LangRussian: " (тайм-аут)",
 	},
 	MsgCronScheduleLabel: {
 		LangEnglish:            "Schedule: %s (%s)\n",
@@ -1969,6 +2245,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "調度: %s (%s)\n",
 		LangJapanese:           "スケジュール: %s (%s)\n",
 		LangSpanish:            "Programación: %s (%s)\n",
+		LangRussian:            "Расписание: %s (%s)\n",
 	},
 	MsgCronNextRunLabel: {
 		LangEnglish:            "Next run: %s\n",
@@ -1976,6 +2253,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "下次執行: %s\n",
 		LangJapanese:           "次回実行: %s\n",
 		LangSpanish:            "Próxima ejecución: %s\n",
+		LangRussian:            "Следующий запуск: %s\n",
 	},
 	MsgCronLastRunLabel: {
 		LangEnglish:            "Last run: %s",
@@ -1983,6 +2261,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "上次執行: %s",
 		LangJapanese:           "前回実行: %s",
 		LangSpanish:            "Última ejecución: %s",
+		LangRussian:            "Последний запуск: %s",
 	},
 	MsgPermBtnAllow: {
 		LangEnglish:            "Allow",
@@ -1990,6 +2269,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "允許",
 		LangJapanese:           "許可",
 		LangSpanish:            "Permitir",
+		LangRussian:            "Разрешить",
 	},
 	MsgPermBtnDeny: {
 		LangEnglish:            "Deny",
@@ -1997,6 +2277,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "拒絕",
 		LangJapanese:           "拒否",
 		LangSpanish:            "Denegar",
+		LangRussian:            "Запретить",
 	},
 	MsgPermBtnAllowAll: {
 		LangEnglish:            "Allow All (this session)",
@@ -2004,6 +2285,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "允許所有 (本次會話)",
 		LangJapanese:           "すべて許可 (このセッション)",
 		LangSpanish:            "Permitir todo (esta sesión)",
+		LangRussian:            "Разрешить всё (в этой сессии)",
 	},
 	MsgPermCardTitle: {
 		LangEnglish:            "Permission Request",
@@ -2011,6 +2293,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "權限請求",
 		LangJapanese:           "権限リクエスト",
 		LangSpanish:            "Solicitud de permiso",
+		LangRussian:            "Запрос разрешения",
 	},
 	MsgPermCardBody: {
 		LangEnglish:            "Agent wants to use **%s**:\n\n```\n%s\n```",
@@ -2018,6 +2301,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "Agent 想要使用 **%s**:\n\n```\n%s\n```",
 		LangJapanese:           "エージェントが **%s** を使用しようとしています:\n\n```\n%s\n```",
 		LangSpanish:            "El agente quiere usar **%s**:\n\n```\n%s\n```",
+		LangRussian:            "Агент хочет использовать **%s**:\n\n```\n%s\n```",
 	},
 	MsgPermCardNote: {
 		LangEnglish:            "If buttons are unresponsive, reply: allow / deny / allow all",
@@ -2025,6 +2309,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "若按鈕無回應，請直接回覆：允許 / 拒絕 / 允許所有",
 		LangJapanese:           "ボタンが反応しない場合は直接返信: allow / deny / allow all",
 		LangSpanish:            "Si los botones no responden, responda: allow / deny / allow all",
+		LangRussian:            "Если кнопки не реагируют, ответьте: allow / deny / allow all",
 	},
 	MsgAskQuestionTitle: {
 		LangEnglish:            "Agent Question",
@@ -2032,6 +2317,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "Agent 提問",
 		LangJapanese:           "エージェントの質問",
 		LangSpanish:            "Pregunta del agente",
+		LangRussian:            "Вопрос агента",
 	},
 	MsgAskQuestionNote: {
 		LangEnglish:            "If buttons are unresponsive, reply with the option number (e.g. 1) or type your answer",
@@ -2039,6 +2325,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "若按鈕無回應，請回覆選項編號（如 1）或直接輸入你的回答",
 		LangJapanese:           "ボタンが反応しない場合は、番号（例: 1）で返信するか、直接回答を入力してください",
 		LangSpanish:            "Si los botones no responden, responda con el número de opción (ej. 1) o escriba su respuesta",
+		LangRussian:            "Если кнопки не реагируют, ответьте номером варианта (напр. 1) или введите ответ",
 	},
 	MsgAskQuestionMulti: {
 		LangEnglish:            " (multiple selections allowed, separate with commas)",
@@ -2046,6 +2333,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "（可多選，用逗號分隔）",
 		LangJapanese:           "（複数選択可、カンマで区切る）",
 		LangSpanish:            " (selección múltiple permitida, separe con comas)",
+		LangRussian:            " (можно выбрать несколько, через запятую)",
 	},
 	MsgAskQuestionPrompt: {
 		LangEnglish:            "❓ **%s**\n\n%s\n\nReply with the option number or type your answer.",
@@ -2053,6 +2341,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❓ **%s**\n\n%s\n\n請回覆選項編號或直接輸入你的回答。",
 		LangJapanese:           "❓ **%s**\n\n%s\n\n番号で返信するか、回答を直接入力してください。",
 		LangSpanish:            "❓ **%s**\n\n%s\n\nResponda con el número de opción o escriba su respuesta.",
+		LangRussian:            "❓ **%s**\n\n%s\n\nОтветьте номером варианта или введите свой ответ.",
 	},
 	MsgAskQuestionAnswered: {
 		LangEnglish:            "Answer",
@@ -2060,6 +2349,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "已回答",
 		LangJapanese:           "回答済み",
 		LangSpanish:            "Respondido",
+		LangRussian:            "Ответ дан",
 	},
 	MsgCommandsTitle: {
 		LangEnglish:            "🔧 **Custom Commands** (%d)\n\n",
@@ -2067,6 +2357,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔧 **自訂命令** (%d)\n\n",
 		LangJapanese:           "🔧 **カスタムコマンド** (%d)\n\n",
 		LangSpanish:            "🔧 **Comandos personalizados** (%d)\n\n",
+		LangRussian:            "🔧 **Пользовательские команды** (%d)\n\n",
 	},
 	MsgCommandsEmpty: {
 		LangEnglish:            "No custom commands configured.\n\nUse `/commands add <name> <prompt>` or add `[[commands]]` in config.toml.",
@@ -2074,6 +2365,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "未配置自訂命令。\n\n使用 `/commands add <名稱> <prompt>` 新增，或在 config.toml 中配置 `[[commands]]`。",
 		LangJapanese:           "カスタムコマンドが設定されていません。\n\n`/commands add <名前> <プロンプト>` で追加するか、config.toml に `[[commands]]` を追加してください。",
 		LangSpanish:            "No hay comandos personalizados configurados.\n\nUse `/commands add <nombre> <prompt>` o agregue `[[commands]]` en config.toml.",
+		LangRussian:            "Пользовательские команды не настроены.\n\nИспользуйте `/commands add <имя> <промпт>` или добавьте `[[commands]]` в config.toml.",
 	},
 	MsgCommandsHint: {
 		LangEnglish:            "Type `/<name> [args]` to use.\n`/commands add <name> <prompt>` to add prompt command\n`/commands addexec <name> <shell>` to add exec command\n`/commands del <name>` to remove",
@@ -2081,6 +2373,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "輸入 `/<名稱> [參數]` 使用。\n`/commands add <名稱> <prompt>` 新增 prompt 命令\n`/commands addexec <名稱> <shell命令>` 新增 exec 命令\n`/commands del <名稱>` 刪除",
 		LangJapanese:           "`/<名前> [引数]` で使用。\n`/commands add <名前> <プロンプト>` プロンプトコマンド追加\n`/commands addexec <名前> <シェルコマンド>` execコマンド追加\n`/commands del <名前>` 削除",
 		LangSpanish:            "Escriba `/<nombre> [args]` para usar.\n`/commands add <nombre> <prompt>` agregar comando prompt\n`/commands addexec <nombre> <shell>` agregar comando exec\n`/commands del <nombre>` eliminar",
+		LangRussian:            "Введите `/<имя> [аргументы]` для использования.\n`/commands add <имя> <промпт>` добавить prompt-команду\n`/commands addexec <имя> <shell-команда>` добавить exec-команду\n`/commands del <имя>` удалить",
 	},
 	MsgCommandsUsage: {
 		LangEnglish:            "Usage:\n`/commands` — list all custom commands\n`/commands add <name> <prompt>` — add prompt command\n`/commands addexec <name> <shell>` — add exec command\n`/commands del <name>` — remove a command",
@@ -2088,6 +2381,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：\n`/commands` — 列出所有自訂命令\n`/commands add <名稱> <prompt>` — 新增 prompt 命令\n`/commands addexec <名稱> <shell命令>` — 新增 exec 命令\n`/commands del <名稱>` — 刪除命令",
 		LangJapanese:           "使い方:\n`/commands` — カスタムコマンド一覧\n`/commands add <名前> <プロンプト>` — プロンプトコマンド追加\n`/commands addexec <名前> <シェルコマンド>` — execコマンド追加\n`/commands del <名前>` — コマンド削除",
 		LangSpanish:            "Uso:\n`/commands` — listar comandos personalizados\n`/commands add <nombre> <prompt>` — agregar comando prompt\n`/commands addexec <nombre> <shell>` — agregar comando exec\n`/commands del <nombre>` — eliminar comando",
+		LangRussian:            "Использование:\n`/commands` — список пользовательских команд\n`/commands add <имя> <промпт>` — добавить prompt-команду\n`/commands addexec <имя> <shell-команда>` — добавить exec-команду\n`/commands del <имя>` — удалить команду",
 	},
 	MsgCommandsAddUsage: {
 		LangEnglish:            "Usage: `/commands add <name> <prompt template>`\n\nExample: `/commands add finduser Search the database for user「{{1}}」`",
@@ -2095,6 +2389,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：`/commands add <名稱> <prompt 模板>`\n\n範例：`/commands add finduser 在資料庫中查找用戶「{{1}}」`",
 		LangJapanese:           "使い方: `/commands add <名前> <プロンプトテンプレート>`\n\n例: `/commands add finduser データベースでユーザー「{{1}}」を検索`",
 		LangSpanish:            "Uso: `/commands add <nombre> <plantilla prompt>`\n\nEjemplo: `/commands add finduser Buscar en la base de datos al usuario「{{1}}」`",
+		LangRussian:            "Использование: `/commands add <имя> <шаблон промпта>`\n\nПример: `/commands add finduser Найти в базе данных пользователя「{{1}}」`",
 	},
 	MsgCommandsAddExecUsage: {
 		LangEnglish:            "Usage: `/commands addexec <name> <shell command>`\n         `/commands addexec --work-dir <dir> <name> <shell command>`\n\nExamples:\n`/commands addexec push git push`\n`/commands addexec status git status {{args}}`",
@@ -2102,6 +2397,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：`/commands addexec <名稱> <shell 命令>`\n      `/commands addexec --work-dir <目錄> <名稱> <shell 命令>`\n\n範例：\n`/commands addexec push git push`\n`/commands addexec status git status {{args}}`",
 		LangJapanese:           "使い方: `/commands addexec <名前> <シェルコマンド>`\n         `/commands addexec --work-dir <ディレクトリ> <名前> <シェルコマンド>`\n\n例:\n`/commands addexec push git push`\n`/commands addexec status git status {{args}}`",
 		LangSpanish:            "Uso: `/commands addexec <nombre> <comando shell>`\n      `/commands addexec --work-dir <dir> <nombre> <comando shell>`\n\nEjemplos:\n`/commands addexec push git push`\n`/commands addexec status git status {{args}}`",
+		LangRussian:            "Использование: `/commands addexec <имя> <shell-команда>`\n         `/commands addexec --work-dir <каталог> <имя> <shell-команда>`\n\nПримеры:\n`/commands addexec push git push`\n`/commands addexec status git status {{args}}`",
 	},
 	MsgCommandsAdded: {
 		LangEnglish:            "✅ Command `/%s` added.\nPrompt: %s",
@@ -2109,6 +2405,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 命令 `/%s` 已新增。\nPrompt: %s",
 		LangJapanese:           "✅ コマンド `/%s` を追加しました。\nプロンプト: %s",
 		LangSpanish:            "✅ Comando `/%s` agregado.\nPrompt: %s",
+		LangRussian:            "✅ Команда `/%s` добавлена.\nPrompt: %s",
 	},
 	MsgCommandsAddExists: {
 		LangEnglish:            "❌ Command `/%s` already exists. Remove it first with `/commands del %s`.",
@@ -2116,6 +2413,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 命令 `/%s` 已存在。請先使用 `/commands del %s` 刪除。",
 		LangJapanese:           "❌ コマンド `/%s` は既に存在します。`/commands del %s` で削除してから追加してください。",
 		LangSpanish:            "❌ El comando `/%s` ya existe. Elimínelo primero con `/commands del %s`.",
+		LangRussian:            "❌ Команда `/%s` уже существует. Сначала удалите её: `/commands del %s`.",
 	},
 	MsgCommandsDelUsage: {
 		LangEnglish:            "Usage: `/commands del <name>`",
@@ -2123,6 +2421,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：`/commands del <名稱>`",
 		LangJapanese:           "使い方: `/commands del <名前>`",
 		LangSpanish:            "Uso: `/commands del <nombre>`",
+		LangRussian:            "Использование: `/commands del <имя>`",
 	},
 	MsgCommandsDeleted: {
 		LangEnglish:            "✅ Command `/%s` removed.",
@@ -2130,6 +2429,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 命令 `/%s` 已刪除。",
 		LangJapanese:           "✅ コマンド `/%s` を削除しました。",
 		LangSpanish:            "✅ Comando `/%s` eliminado.",
+		LangRussian:            "✅ Команда `/%s` удалена.",
 	},
 	MsgCommandsNotFound: {
 		LangEnglish:            "❌ Command `/%s` not found. Use `/commands` to see available commands.",
@@ -2137,6 +2437,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 命令 `/%s` 未找到。使用 `/commands` 查看可用命令。",
 		LangJapanese:           "❌ コマンド `/%s` が見つかりません。`/commands` で一覧を確認してください。",
 		LangSpanish:            "❌ Comando `/%s` no encontrado. Use `/commands` para ver los comandos disponibles.",
+		LangRussian:            "❌ Команда `/%s` не найдена. Используйте `/commands` для просмотра доступных команд.",
 	},
 	MsgCommandsExecAdded: {
 		LangEnglish:            "✅ Exec command `/%s` added.\nCommand: %s",
@@ -2144,6 +2445,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ Exec 命令 `/%s` 已新增。\n命令: %s",
 		LangJapanese:           "✅ Exec コマンド `/%s` を追加しました。\nコマンド: %s",
 		LangSpanish:            "✅ Comando exec `/%s` agregado.\nComando: %s",
+		LangRussian:            "✅ Exec-команда `/%s` добавлена.\nКоманда: %s",
 	},
 	MsgCommandExecTimeout: {
 		LangEnglish:            "⏱️ Command `/%s` timed out (60s limit).",
@@ -2151,6 +2453,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⏱️ 命令 `/%s` 超時（60秒限制）。",
 		LangJapanese:           "⏱️ コマンド `/%s` がタイムアウトしました（60秒制限）。",
 		LangSpanish:            "⏱️ Comando `/%s` agotó el tiempo (límite 60s).",
+		LangRussian:            "⏱️ Команда `/%s` превысила тайм-аут (лимит 60 сек).",
 	},
 	MsgCommandExecError: {
 		LangEnglish:            "❌ Command `/%s` failed:\n%s",
@@ -2158,6 +2461,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 命令 `/%s` 執行失敗：\n%s",
 		LangJapanese:           "❌ コマンド `/%s` が失敗しました：\n%s",
 		LangSpanish:            "❌ Comando `/%s` falló:\n%s",
+		LangRussian:            "❌ Команда `/%s` завершилась с ошибкой:\n%s",
 	},
 	MsgCommandExecSuccess: {
 		LangEnglish:            "✅ Command executed successfully (no output).",
@@ -2165,6 +2469,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 命令執行成功（無輸出）。",
 		LangJapanese:           "✅ コマンドが正常に実行されました（出力なし）。",
 		LangSpanish:            "✅ Comando ejecutado exitosamente (sin salida).",
+		LangRussian:            "✅ Команда выполнена успешно (нет вывода).",
 	},
 	MsgSkillsTitle: {
 		LangEnglish:            "📋 Available Skills (%s) — %d skill(s)\n\n",
@@ -2172,6 +2477,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "📋 可用 Skills (%s) — %d 個\n\n",
 		LangJapanese:           "📋 利用可能なスキル (%s) — %d 個\n\n",
 		LangSpanish:            "📋 Skills disponibles (%s) — %d skill(s)\n\n",
+		LangRussian:            "📋 Доступные навыки (%s) — %d шт.\n\n",
 	},
 	MsgSkillsEmpty: {
 		LangEnglish:            "No skills found.\nSkills are discovered from agent directories (e.g. .claude/skills/<name>/SKILL.md).",
@@ -2179,6 +2485,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "未發現任何 Skill。\nSkill 從 Agent 目錄自動發現（如 .claude/skills/<name>/SKILL.md）。",
 		LangJapanese:           "スキルが見つかりません。\nスキルはエージェントのディレクトリから自動検出されます（例: .claude/skills/<name>/SKILL.md）。",
 		LangSpanish:            "No se encontraron skills.\nLos skills se descubren de los directorios del agente (ej. .claude/skills/<name>/SKILL.md).",
+		LangRussian:            "Навыки не найдены.\nНавыки обнаруживаются из каталогов агента (напр. .claude/skills/<name>/SKILL.md).",
 	},
 	MsgSkillsHint: {
 		LangEnglish:            "Usage: /<skill-name> [args...] to invoke a skill.",
@@ -2186,6 +2493,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：/<skill名稱> [參數...] 來調用 Skill。",
 		LangJapanese:           "使い方：/<スキル名> [引数...] でスキルを実行します。",
 		LangSpanish:            "Uso: /<nombre-skill> [args...] para invocar un skill.",
+		LangRussian:            "Использование: /<имя-навыка> [аргументы...] для вызова навыка.",
 	},
 
 	MsgConfigTitle: {
@@ -2194,6 +2502,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⚙️ **執行階段配置**\n\n",
 		LangJapanese:           "⚙️ **ランタイム設定**\n\n",
 		LangSpanish:            "⚙️ **Configuración en tiempo de ejecución**\n\n",
+		LangRussian:            "⚙️ **Настройки времени выполнения**\n\n",
 	},
 	MsgConfigHint: {
 		LangEnglish: "Usage:\n" +
@@ -2221,6 +2530,11 @@ var messages = map[MsgKey]map[Language]string{
 			"`/config thinking_max_len 200` — actualizar\n" +
 			"`/config get thinking_max_len` — ver uno\n\n" +
 			"Establecer `0` para no truncar.",
+		LangRussian: "Использование:\n" +
+			"`/config` — показать все\n" +
+			"`/config thinking_max_len 200` — изменить\n" +
+			"`/config get thinking_max_len` — посмотреть значение\n\n" +
+			"Значение `0` — без обрезки.",
 	},
 	MsgConfigGetUsage: {
 		LangEnglish:            "Usage: `/config get thinking_max_len`",
@@ -2228,6 +2542,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：`/config get thinking_max_len`",
 		LangJapanese:           "使い方: `/config get thinking_max_len`",
 		LangSpanish:            "Uso: `/config get thinking_max_len`",
+		LangRussian:            "Использование: `/config get thinking_max_len`",
 	},
 	MsgConfigSetUsage: {
 		LangEnglish:            "Usage: `/config set thinking_max_len 200`",
@@ -2235,6 +2550,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：`/config set thinking_max_len 200`",
 		LangJapanese:           "使い方: `/config set thinking_max_len 200`",
 		LangSpanish:            "Uso: `/config set thinking_max_len 200`",
+		LangRussian:            "Использование: `/config set thinking_max_len 200`",
 	},
 	MsgConfigUpdated: {
 		LangEnglish:            "✅ `%s` → `%s`",
@@ -2242,6 +2558,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ `%s` → `%s`",
 		LangJapanese:           "✅ `%s` → `%s`",
 		LangSpanish:            "✅ `%s` → `%s`",
+		LangRussian:            "✅ `%s` → `%s`",
 	},
 	MsgConfigKeyNotFound: {
 		LangEnglish:            "❌ Unknown config key `%s`. Use `/config` to see available keys.",
@@ -2249,6 +2566,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 未知配置項 `%s`。使用 `/config` 查看可用配置。",
 		LangJapanese:           "❌ 不明な設定キー `%s`。`/config` で一覧を確認してください。",
 		LangSpanish:            "❌ Clave de configuración desconocida `%s`. Use `/config` para ver las disponibles.",
+		LangRussian:            "❌ Неизвестный ключ настройки `%s`. Используйте `/config` для просмотра доступных.",
 	},
 	MsgConfigReloaded: {
 		LangEnglish:            "✅ Config reloaded\n\nDisplay updated: %v\nProviders synced: %d\nCommands synced: %d",
@@ -2256,6 +2574,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 配置已重新載入\n\n顯示設定已更新：%v\nProvider 已同步：%d 個\n自訂命令已同步：%d 個",
 		LangJapanese:           "✅ 設定をリロードしました\n\n表示設定更新: %v\nプロバイダ同期: %d 件\nコマンド同期: %d 件",
 		LangSpanish:            "✅ Configuración recargada\n\nPantalla actualizada: %v\nProveedores sincronizados: %d\nComandos sincronizados: %d",
+		LangRussian:            "✅ Настройки перезагружены\n\nОтображение обновлено: %v\nПровайдеров синхронизировано: %d\nКоманд синхронизировано: %d",
 	},
 	MsgDoctorRunning: {
 		LangEnglish:            "🏥 Running diagnostics...",
@@ -2263,6 +2582,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🏥 正在執行系統診斷...",
 		LangJapanese:           "🏥 診断を実行中...",
 		LangSpanish:            "🏥 Ejecutando diagnósticos...",
+		LangRussian:            "🏥 Запускаю диагностику...",
 	},
 	MsgDoctorTitle: {
 		LangEnglish:            "🏥 **System Diagnostic Report**\n\n",
@@ -2270,6 +2590,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🏥 **系統診斷報告**\n\n",
 		LangJapanese:           "🏥 **システム診断レポート**\n\n",
 		LangSpanish:            "🏥 **Informe de diagnóstico del sistema**\n\n",
+		LangRussian:            "🏥 **Отчёт диагностики системы**\n\n",
 	},
 	MsgDoctorSummary: {
 		LangEnglish:            "\n✅ %d passed  ⚠️ %d warnings  ❌ %d failed",
@@ -2277,6 +2598,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "\n✅ %d 項通過  ⚠️ %d 項警告  ❌ %d 項失敗",
 		LangJapanese:           "\n✅ %d 合格  ⚠️ %d 警告  ❌ %d 失敗",
 		LangSpanish:            "\n✅ %d aprobados  ⚠️ %d advertencias  ❌ %d fallidos",
+		LangRussian:            "\n✅ %d пройдено  ⚠️ %d предупреждений  ❌ %d ошибок",
 	},
 	MsgRestarting: {
 		LangEnglish:            "🔄 Restarting cc-connect...",
@@ -2284,6 +2606,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔄 正在重啟 cc-connect...",
 		LangJapanese:           "🔄 cc-connect を再起動中...",
 		LangSpanish:            "🔄 Reiniciando cc-connect...",
+		LangRussian:            "🔄 Перезапускаю cc-connect...",
 	},
 	MsgRestartSuccess: {
 		LangEnglish:            "✅ cc-connect restarted successfully.",
@@ -2291,6 +2614,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ cc-connect 重啟成功。",
 		LangJapanese:           "✅ cc-connect の再起動が完了しました。",
 		LangSpanish:            "✅ cc-connect se reinició correctamente.",
+		LangRussian:            "✅ cc-connect успешно перезапущен.",
 	},
 	MsgUpgradeChecking: {
 		LangEnglish:            "🔍 Checking for updates...",
@@ -2298,6 +2622,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔍 正在檢查更新...",
 		LangJapanese:           "🔍 アップデートを確認中...",
 		LangSpanish:            "🔍 Buscando actualizaciones...",
+		LangRussian:            "🔍 Проверяю обновления...",
 	},
 	MsgUpgradeUpToDate: {
 		LangEnglish:            "✅ Already up to date (%s)",
@@ -2305,6 +2630,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 已是最新版本 (%s)",
 		LangJapanese:           "✅ 最新バージョンです (%s)",
 		LangSpanish:            "✅ Ya está actualizado (%s)",
+		LangRussian:            "✅ Уже установлена последняя версия (%s)",
 	},
 	MsgUpgradeAvailable: {
 		LangEnglish: "🆕 New version available!\n\n\n" +
@@ -2332,6 +2658,11 @@ var messages = map[MsgKey]map[Language]string{
 			"Última: **%s**\n\n\n" +
 			"%s\n\n\n" +
 			"Ejecute `/upgrade confirm` para instalar.",
+		LangRussian: "🆕 Доступна новая версия!\n\n\n" +
+			"Текущая: **%s**\n" +
+			"Последняя: **%s**\n\n\n" +
+			"%s\n\n\n" +
+			"Выполните `/upgrade confirm` для установки.",
 	},
 	MsgUpgradeDownloading: {
 		LangEnglish:            "⬇️ Downloading %s ...",
@@ -2339,6 +2670,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⬇️ 正在下載 %s ...",
 		LangJapanese:           "⬇️ ダウンロード中 %s ...",
 		LangSpanish:            "⬇️ Descargando %s ...",
+		LangRussian:            "⬇️ Скачиваю %s ...",
 	},
 	MsgUpgradeSuccess: {
 		LangEnglish:            "✅ Updated to **%s** successfully! Restarting...",
@@ -2346,6 +2678,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 已成功更新到 **%s**！正在重啟...",
 		LangJapanese:           "✅ **%s** に更新しました！再起動中...",
 		LangSpanish:            "✅ ¡Actualizado a **%s** con éxito! Reiniciando...",
+		LangRussian:            "✅ Успешно обновлено до **%s**! Перезапускаю...",
 	},
 	MsgUpgradeDevBuild: {
 		LangEnglish:            "⚠️ Running a dev build — version check is not available. Please build from source or install a release version.",
@@ -2353,6 +2686,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⚠️ 當前為開發版本，無法檢查更新。請從源碼構建或安裝正式發佈版本。",
 		LangJapanese:           "⚠️ 開発ビルドのため、バージョン確認ができません。ソースからビルドするか、リリース版をインストールしてください。",
 		LangSpanish:            "⚠️ Compilación de desarrollo — la verificación de versión no está disponible. Compile desde el código fuente o instale una versión publicada.",
+		LangRussian:            "⚠️ Используется dev-сборка — проверка версии недоступна. Соберите из исходников или установите релизную версию.",
 	},
 	MsgAliasEmpty: {
 		LangEnglish:            "No aliases configured. Use `/alias add <trigger> <command>` to create one.",
@@ -2360,6 +2694,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "尚無別名配置。使用 `/alias add <觸發詞> <命令>` 建立別名。",
 		LangJapanese:           "エイリアスは設定されていません。`/alias add <トリガー> <コマンド>` で作成してください。",
 		LangSpanish:            "No hay alias configurados. Use `/alias add <trigger> <comando>` para crear uno.",
+		LangRussian:            "Алиасы не настроены. Используйте `/alias add <триггер> <команда>` для создания.",
 	},
 	MsgAliasListHeader: {
 		LangEnglish:            "📎 Aliases (%d)",
@@ -2367,6 +2702,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "📎 命令別名 (%d)",
 		LangJapanese:           "📎 エイリアス (%d)",
 		LangSpanish:            "📎 Alias (%d)",
+		LangRussian:            "📎 Алиасы (%d)",
 	},
 	MsgAliasAdded: {
 		LangEnglish:            "✅ Alias added: %s → %s",
@@ -2374,6 +2710,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 別名已新增：%s → %s",
 		LangJapanese:           "✅ エイリアス追加：%s → %s",
 		LangSpanish:            "✅ Alias añadido: %s → %s",
+		LangRussian:            "✅ Алиас добавлен: %s → %s",
 	},
 	MsgAliasDeleted: {
 		LangEnglish:            "✅ Alias removed: %s",
@@ -2381,6 +2718,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 別名已刪除：%s",
 		LangJapanese:           "✅ エイリアス削除：%s",
 		LangSpanish:            "✅ Alias eliminado: %s",
+		LangRussian:            "✅ Алиас удалён: %s",
 	},
 	MsgAliasNotFound: {
 		LangEnglish:            "❌ Alias `%s` not found.",
@@ -2388,6 +2726,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 別名 `%s` 不存在。",
 		LangJapanese:           "❌ エイリアス `%s` が見つかりません。",
 		LangSpanish:            "❌ Alias `%s` no encontrado.",
+		LangRussian:            "❌ Алиас `%s` не найден.",
 	},
 	MsgAliasUsage: {
 		LangEnglish:            "Usage:\n  `/alias` — list all aliases\n  `/alias add <trigger> <command>` — add alias\n  `/alias del <trigger>` — remove alias\n\nExample: `/alias add 帮助 /help`",
@@ -2395,6 +2734,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：\n  `/alias` — 列出所有別名\n  `/alias add <觸發詞> <命令>` — 新增別名\n  `/alias del <觸發詞>` — 刪除別名\n\n範例：`/alias add 幫助 /help`",
 		LangJapanese:           "使い方：\n  `/alias` — エイリアス一覧\n  `/alias add <トリガー> <コマンド>` — 追加\n  `/alias del <トリガー>` — 削除\n\n例: `/alias add ヘルプ /help`",
 		LangSpanish:            "Uso:\n  `/alias` — listar aliases\n  `/alias add <trigger> <comando>` — añadir alias\n  `/alias del <trigger>` — eliminar alias\n\nEjemplo: `/alias add ayuda /help`",
+		LangRussian:            "Использование:\n  `/alias` — список алиасов\n  `/alias add <триггер> <команда>` — добавить алиас\n  `/alias del <триггер>` — удалить алиас\n\nПример: `/alias add помощь /help`",
 	},
 	MsgNewSessionCreated: {
 		LangEnglish:            "✅ New session created",
@@ -2402,6 +2742,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 新會話已建立",
 		LangJapanese:           "✅ 新しいセッションを作成しました",
 		LangSpanish:            "✅ Nueva sesión creada",
+		LangRussian:            "✅ Новая сессия создана",
 	},
 	MsgNewSessionCreatedName: {
 		LangEnglish:            "✅ New session created: **%s**",
@@ -2409,6 +2750,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 新會話已建立：**%s**",
 		LangJapanese:           "✅ 新しいセッションを作成しました：**%s**",
 		LangSpanish:            "✅ Nueva sesión creada: **%s**",
+		LangRussian:            "✅ Новая сессия создана: **%s**",
 	},
 	MsgDeleteUsage: {
 		LangEnglish:            "Usage: `/delete <number>` or `/delete 1,2,3` or `/delete 3-7` or `/delete 1,3-5,8`.\nUse `/list` to see session numbers.",
@@ -2416,6 +2758,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法：`/delete <序號>`，或 `/delete 1,2,3`，或 `/delete 3-7`，或 `/delete 1,3-5,8`。\n使用 `/list` 查看會話序號。",
 		LangJapanese:           "使い方：`/delete <番号>`、または `/delete 1,2,3`、または `/delete 3-7`、または `/delete 1,3-5,8`。\n`/list` で番号を確認できます。",
 		LangSpanish:            "Uso: `/delete <número>` o `/delete 1,2,3` o `/delete 3-7` o `/delete 1,3-5,8`.\nUse `/list` para ver los números.",
+		LangRussian:            "Использование: `/delete <номер>` или `/delete 1,2,3` или `/delete 3-7` или `/delete 1,3-5,8`.\nИспользуйте `/list` для просмотра номеров.",
 	},
 	MsgDeleteSuccess: {
 		LangEnglish:            "🗑️ Session deleted: %s",
@@ -2423,6 +2766,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🗑️ 會話已刪除：%s",
 		LangJapanese:           "🗑️ セッション削除：%s",
 		LangSpanish:            "🗑️ Sesión eliminada: %s",
+		LangRussian:            "🗑️ Сессия удалена: %s",
 	},
 	MsgSwitchSuccess: {
 		LangEnglish:            "✅ Switched to: %s (%s, %d msgs)",
@@ -2430,6 +2774,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 已切換到：%s（%s，%d 則訊息）",
 		LangJapanese:           "✅ 切り替え：%s（%s、%d件）",
 		LangSpanish:            "✅ Cambiado a: %s (%s, %d mensajes)",
+		LangRussian:            "✅ Переключено на: %s (%s, %d сообщ.)",
 	},
 	MsgSwitchNoMatch: {
 		LangEnglish:            "❌ No session matching %q",
@@ -2437,6 +2782,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 沒有找到匹配 %q 的會話",
 		LangJapanese:           "❌ %q に一致するセッションが見つかりません",
 		LangSpanish:            "❌ No hay sesión que coincida con %q",
+		LangRussian:            "❌ Нет сессии, соответствующей %q",
 	},
 	MsgSwitchNoSession: {
 		LangEnglish:            "❌ No session #%d",
@@ -2444,6 +2790,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 沒有第 %d 個會話",
 		LangJapanese:           "❌ セッション #%d が見つかりません",
 		LangSpanish:            "❌ No hay sesión #%d",
+		LangRussian:            "❌ Нет сессии #%d",
 	},
 	MsgCommandTimeout: {
 		LangEnglish:            "⏰ Command timed out (60s): `%s`",
@@ -2451,6 +2798,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⏰ 命令逾時 (60秒): `%s`",
 		LangJapanese:           "⏰ コマンドがタイムアウトしました (60秒): `%s`",
 		LangSpanish:            "⏰ Comando agotado (60s): `%s`",
+		LangRussian:            "⏰ Тайм-аут команды (60 сек): `%s`",
 	},
 	MsgDeleteActiveDenied: {
 		LangEnglish:            "❌ Cannot delete the currently active session. Switch to another session first.",
@@ -2458,6 +2806,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 不能刪除當前活躍會話，請先切換到其他會話。",
 		LangJapanese:           "❌ 現在アクティブなセッションは削除できません。先に別のセッションに切り替えてください。",
 		LangSpanish:            "❌ No se puede eliminar la sesión activa. Cambie a otra sesión primero.",
+		LangRussian:            "❌ Нельзя удалить активную сессию. Сначала переключитесь на другую.",
 	},
 	MsgDeleteNotSupported: {
 		LangEnglish:            "❌ This agent does not support session deletion.",
@@ -2465,6 +2814,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 當前 Agent 不支持刪除會話。",
 		LangJapanese:           "❌ このエージェントはセッション削除をサポートしていません。",
 		LangSpanish:            "❌ Este agente no admite la eliminación de sesiones.",
+		LangRussian:            "❌ Этот агент не поддерживает удаление сессий.",
 	},
 	MsgDeleteModeTitle: {
 		LangEnglish:            "Delete Sessions",
@@ -2472,6 +2822,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "刪除會話",
 		LangJapanese:           "セッション削除",
 		LangSpanish:            "Eliminar sesiones",
+		LangRussian:            "Удаление сессий",
 	},
 	MsgDeleteModeSelect: {
 		LangEnglish:            "Select",
@@ -2479,6 +2830,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "選擇",
 		LangJapanese:           "選択",
 		LangSpanish:            "Seleccionar",
+		LangRussian:            "Выбрать",
 	},
 	MsgDeleteModeSelected: {
 		LangEnglish:            "Selected",
@@ -2486,6 +2838,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "已選",
 		LangJapanese:           "選択済み",
 		LangSpanish:            "Seleccionado",
+		LangRussian:            "Выбрано",
 	},
 	MsgDeleteModeSelectedCount: {
 		LangEnglish:            "%d selected",
@@ -2493,6 +2846,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "已選 %d 項",
 		LangJapanese:           "%d 件を選択中",
 		LangSpanish:            "%d seleccionadas",
+		LangRussian:            "Выбрано: %d",
 	},
 	MsgDeleteModeDeleteSelected: {
 		LangEnglish:            "Delete Selected",
@@ -2500,6 +2854,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "刪除已選",
 		LangJapanese:           "選択項目を削除",
 		LangSpanish:            "Eliminar seleccionadas",
+		LangRussian:            "Удалить выбранные",
 	},
 	MsgDeleteModeCancel: {
 		LangEnglish:            "Cancel",
@@ -2507,6 +2862,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "取消",
 		LangJapanese:           "キャンセル",
 		LangSpanish:            "Cancelar",
+		LangRussian:            "Отмена",
 	},
 	MsgDeleteModeConfirmTitle: {
 		LangEnglish:            "Confirm Delete",
@@ -2514,6 +2870,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "確認刪除",
 		LangJapanese:           "削除確認",
 		LangSpanish:            "Confirmar eliminación",
+		LangRussian:            "Подтвердить удаление",
 	},
 	MsgDeleteModeConfirmButton: {
 		LangEnglish:            "Confirm Delete",
@@ -2521,6 +2878,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "確認刪除",
 		LangJapanese:           "削除を確認",
 		LangSpanish:            "Confirmar eliminación",
+		LangRussian:            "Подтвердить удаление",
 	},
 	MsgDeleteModeBackButton: {
 		LangEnglish:            "Back",
@@ -2528,6 +2886,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "返回繼續選擇",
 		LangJapanese:           "選択に戻る",
 		LangSpanish:            "Volver",
+		LangRussian:            "Назад",
 	},
 	MsgDeleteModeEmptySelection: {
 		LangEnglish:            "Select at least one session.",
@@ -2535,6 +2894,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "請至少選擇一個會話。",
 		LangJapanese:           "少なくとも 1 つのセッションを選択してください。",
 		LangSpanish:            "Seleccione al menos una sesión.",
+		LangRussian:            "Выберите хотя бы одну сессию.",
 	},
 	MsgDeleteModeResultTitle: {
 		LangEnglish:            "Delete Result",
@@ -2542,6 +2902,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "刪除結果",
 		LangJapanese:           "削除結果",
 		LangSpanish:            "Resultado de eliminación",
+		LangRussian:            "Результат удаления",
 	},
 	MsgDeleteModeMissingSession: {
 		LangEnglish:            "❌ Missing selected session: %s",
@@ -2549,6 +2910,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 已選會話不存在：%s",
 		LangJapanese:           "❌ 選択したセッションが見つかりません: %s",
 		LangSpanish:            "❌ Falta la sesión seleccionada: %s",
+		LangRussian:            "❌ Выбранная сессия не найдена: %s",
 	},
 	MsgBannedWordBlocked: {
 		LangEnglish:            "⚠️ Your message was blocked because it contains a prohibited word.",
@@ -2556,6 +2918,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⚠️ 訊息已被攔截，包含違禁詞。",
 		LangJapanese:           "⚠️ 禁止ワードが含まれているため、メッセージがブロックされました。",
 		LangSpanish:            "⚠️ Su mensaje fue bloqueado porque contiene una palabra prohibida.",
+		LangRussian:            "⚠️ Ваше сообщение заблокировано, так как содержит запрещённое слово.",
 	},
 	MsgCommandDisabled: {
 		LangEnglish:            "🚫 Command `%s` is disabled for this project.",
@@ -2563,6 +2926,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🚫 命令 `%s` 在當前專案中已被停用。",
 		LangJapanese:           "🚫 コマンド `%s` はこのプロジェクトで無効化されています。",
 		LangSpanish:            "🚫 El comando `%s` está deshabilitado para este proyecto.",
+		LangRussian:            "🚫 Команда `%s` отключена для этого проекта.",
 	},
 	MsgAdminRequired: {
 		LangEnglish:            "🔒 Command `%s` requires admin privilege. Set `admin_from` in config to authorize users.",
@@ -2570,6 +2934,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔒 命令 `%s` 需要管理員權限。請在配置中設定 `admin_from` 來授權使用者。",
 		LangJapanese:           "🔒 コマンド `%s` には管理者権限が必要です。設定で `admin_from` を設定してユーザーを承認してください。",
 		LangSpanish:            "🔒 El comando `%s` requiere privilegios de administrador. Configure `admin_from` en la configuración.",
+		LangRussian:            "🔒 Команда `%s` требует прав администратора. Настройте `admin_from` в конфигурации.",
 	},
 	MsgRateLimited: {
 		LangEnglish:            "⏳ You are sending messages too fast. Please wait a moment.",
@@ -2577,38 +2942,47 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⏳ 訊息發送過快，請稍後再試。",
 		LangJapanese:           "⏳ メッセージの送信が速すぎます。しばらくお待ちください。",
 		LangSpanish:            "⏳ Estás enviando mensajes demasiado rápido. Espera un momento.",
+		LangRussian:            "⏳ Вы отправляете сообщения слишком быстро. Подождите немного.",
 	},
 	MsgRelayNoBinding: {
 		LangEnglish: "No relay binding in this chat.\nUse `/bind <project>` to bind another bot.\nThe <project> is the project name from your config.toml.",
 		LangChinese: "当前群聊没有中继绑定。\n使用 `/bind <项目名>` 绑定另一个机器人。\n<项目名> 是 config.toml 中 [[projects]] 的 name 字段。",
+		LangRussian: "В этом чате нет ретрансляции.\nИспользуйте `/bind <проект>` для привязки другого бота.\n<проект> — имя проекта из config.toml.",
 	},
 	MsgRelayBound: {
 		LangEnglish: "Current relay binding: %s",
 		LangChinese: "当前中继绑定: %s",
+		LangRussian: "Текущая ретрансляция: %s",
 	},
 	MsgRelayUsage: {
 		LangEnglish: "Usage:\n  /bind <project>  — bind with another bot in this group\n  /bind remove     — remove binding\n  /bind            — show current binding\n\n<project> is the project name from config.toml [[projects]].",
 		LangChinese: "用法:\n  /bind <项目名>  — 绑定群聊中的另一个机器人\n  /bind remove    — 解除绑定\n  /bind           — 查看当前绑定\n\n<项目名> 是 config.toml 中 [[projects]] 的 name 字段。",
+		LangRussian: "Использование:\n  /bind <проект>  — привязать другого бота в этой группе\n  /bind remove     — удалить привязку\n  /bind            — показать текущую привязку\n\n<проект> — имя проекта из config.toml [[projects]].",
 	},
 	MsgRelayNotAvailable: {
 		LangEnglish: "Relay is not available. Make sure you have multiple projects configured.",
 		LangChinese: "中继功能不可用。请确保配置了多个项目。",
+		LangRussian: "Ретрансляция недоступна. Убедитесь, что настроено несколько проектов.",
 	},
 	MsgRelayUnbound: {
 		LangEnglish: "Relay binding removed.",
 		LangChinese: "中继绑定已解除。",
+		LangRussian: "Привязка ретрансляции удалена.",
 	},
 	MsgRelayBindSelf: {
 		LangEnglish: "Cannot bind to yourself. Specify a different project.",
 		LangChinese: "不能绑定自己，请指定另一个项目。",
+		LangRussian: "Нельзя привязать к себе. Укажите другой проект.",
 	},
 	MsgRelayNotFound: {
 		LangEnglish: "Project %q not found. Available projects: %s",
 		LangChinese: "项目 %q 不存在。可用的项目: %s",
+		LangRussian: "Проект %q не найден. Доступные проекты: %s",
 	},
 	MsgRelayNoTarget: {
 		LangEnglish: "Project %q not found. No other projects are configured.",
 		LangChinese: "项目 %q 不存在。没有配置其他项目。",
+		LangRussian: "Проект %q не найден. Другие проекты не настроены.",
 	},
 	MsgRelayBindRemoved: {
 		LangEnglish:            "✅ Removed %s from binding",
@@ -2616,6 +2990,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 已從綁定中移除 %s",
 		LangJapanese:           "✅ %s をバインドから削除しました",
 		LangSpanish:            "✅ Eliminado %s del enlace",
+		LangRussian:            "✅ %s удалён из привязки",
 	},
 	MsgRelayBindNotFound: {
 		LangEnglish:            "❌ %s is not bound or binding does not exist",
@@ -2623,6 +2998,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ %s 未綁定或綁定不存在",
 		LangJapanese:           "❌ %s はバインドされていないか、バインドが存在しません",
 		LangSpanish:            "❌ %s no está vinculado o el enlace no existe",
+		LangRussian:            "❌ %s не привязан или привязка не существует",
 	},
 	MsgRelayBindSuccess: {
 		LangEnglish:            "✅ Bind successful! Current group bound: %s\n\nYou can now ask this bot to communicate with %s.\nExample: \"Ask %s about ...\"",
@@ -2630,6 +3006,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 綁定成功！當前群組已綁定: %s\n\n你現在可以讓本機器人去詢問 %s。\n示例：\"幫我問一下 %s ...\"",
 		LangJapanese:           "✅ バインド成功！現在のグループ: %s\n\nこのボットに %s への問い合わせを依頼できます。\n例：「%s に...を聞いて」",
 		LangSpanish:            "✅ ¡Enlace exitoso! Grupo actual: %s\n\nAhora puede pedir a este bot que consulte a %s.\nEjemplo: \"Pregunta a %s sobre ...\"",
+		LangRussian:            "✅ Привязка успешна! Текущая группа привязана: %s\n\nТеперь вы можете попросить этого бота обратиться к %s.\nПример: \"Спроси у %s о ...\"",
 	},
 	MsgRelaySetupHint: {
 		LangEnglish:            "\n\n⚠️ This agent does not auto-inject relay instructions.\nPlease run `/bind setup` or `/cron setup` to write instructions to %s.",
@@ -2637,6 +3014,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "\n\n⚠️ 當前 agent 不會自動注入中繼指令。\n請執行 `/bind setup` 或 `/cron setup` 將指令寫入 %s。",
 		LangJapanese:           "\n\n⚠️ このエージェントはリレー指示を自動注入しません。\n`/bind setup` または `/cron setup` を実行して %s に指示を書き込んでください。",
 		LangSpanish:            "\n\n⚠️ Este agente no inyecta instrucciones de relay automáticamente.\nEjecute `/bind setup` o `/cron setup` para escribir las instrucciones en %s.",
+		LangRussian:            "\n\n⚠️ Этот агент не внедряет инструкции ретрансляции автоматически.\nВыполните `/bind setup` или `/cron setup` для записи инструкций в %s.",
 	},
 	MsgRelaySetupOK: {
 		LangEnglish:            "✅ cc-connect instructions written to %s\nThe agent will now know how to use relay and cron.",
@@ -2644,6 +3022,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ cc-connect 指令已寫入 %s\nagent 現在可以使用中繼和定時任務功能了。",
 		LangJapanese:           "✅ cc-connect の指示を %s に書き込みました。\nエージェントがリレーとcronを使用できるようになりました。",
 		LangSpanish:            "✅ Instrucciones de cc-connect escritas en %s\nEl agente ahora puede usar relay y cron.",
+		LangRussian:            "✅ Инструкции cc-connect записаны в %s\nАгент теперь может использовать ретрансляцию и cron.",
 	},
 	MsgRelaySetupExists: {
 		LangEnglish:            "ℹ️ cc-connect instructions already exist in %s — no changes made.",
@@ -2651,6 +3030,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "ℹ️ cc-connect 指令已存在於 %s 中，無需重複寫入。",
 		LangJapanese:           "ℹ️ cc-connect の指示は既に %s に存在します。変更はありません。",
 		LangSpanish:            "ℹ️ Las instrucciones de cc-connect ya existen en %s — sin cambios.",
+		LangRussian:            "ℹ️ Инструкции cc-connect уже существуют в %s — без изменений.",
 	},
 	MsgRelaySetupNoMemory: {
 		LangEnglish:            "❌ This agent does not support instruction files.",
@@ -2658,6 +3038,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 當前 agent 不支持指令檔案。",
 		LangJapanese:           "❌ このエージェントは指示ファイルをサポートしていません。",
 		LangSpanish:            "❌ Este agente no soporta archivos de instrucciones.",
+		LangRussian:            "❌ Этот агент не поддерживает файлы инструкций.",
 	},
 	MsgSetupNative: {
 		LangEnglish:            "✅ This agent natively supports cc-connect instructions — no setup needed.",
@@ -2665,6 +3046,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 當前 agent 已原生支持 cc-connect 指令，無需額外配置。",
 		LangJapanese:           "✅ このエージェントは cc-connect の指示をネイティブサポートしています。セットアップ不要です。",
 		LangSpanish:            "✅ Este agente soporta nativamente las instrucciones de cc-connect — no se necesita configuración.",
+		LangRussian:            "✅ Этот агент нативно поддерживает инструкции cc-connect — настройка не требуется.",
 	},
 	MsgCronSetupOK: {
 		LangEnglish:            "✅ Cron instructions written to %s\nYou can now tell the agent to create scheduled tasks in natural language.",
@@ -2672,6 +3054,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 定時任務指令已寫入 %s\n你現在可以用自然語言讓 agent 建立定時任務了。",
 		LangJapanese:           "✅ cron の指示を %s に書き込みました。\n自然言語でエージェントにスケジュールタスクの作成を依頼できるようになりました。",
 		LangSpanish:            "✅ Instrucciones de cron escritas en %s\nAhora puede decirle al agente que cree tareas programadas en lenguaje natural.",
+		LangRussian:            "✅ Инструкции cron записаны в %s\nТеперь вы можете просить агента создавать запланированные задачи на обычном языке.",
 	},
 	MsgSearchUsage: {
 		LangEnglish:            "Usage: /search <keyword>\nSearch sessions by name or ID.",
@@ -2679,6 +3062,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法: /search <關鍵詞>\n搜尋會話名稱或 ID。",
 		LangJapanese:           "使い方: /search <キーワード>\nセッション名またはIDで検索。",
 		LangSpanish:            "Uso: /search <palabra_clave>\nBuscar sesiones por nombre o ID.",
+		LangRussian:            "Использование: /search <ключевое_слово>\nПоиск сессий по имени или ID.",
 	},
 	MsgSearchError: {
 		LangEnglish:            "❌ Search error: %v",
@@ -2686,6 +3070,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 搜尋失敗: %v",
 		LangJapanese:           "❌ 検索エラー: %v",
 		LangSpanish:            "❌ Error de búsqueda: %v",
+		LangRussian:            "❌ Ошибка поиска: %v",
 	},
 	MsgSearchNoResult: {
 		LangEnglish:            "No sessions found matching %q",
@@ -2693,6 +3078,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "沒有找到匹配 %q 的會話",
 		LangJapanese:           "%q に一致するセッションが見つかりません",
 		LangSpanish:            "No se encontraron sesiones que coincidan con %q",
+		LangRussian:            "Не найдено сессий, соответствующих %q",
 	},
 	MsgSearchResult: {
 		LangEnglish:            "🔍 Found %d session(s) matching %q:",
@@ -2700,6 +3086,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔍 找到 %d 個匹配 %q 的會話:",
 		LangJapanese:           "🔍 %q に一致する %d 件のセッション:",
 		LangSpanish:            "🔍 Se encontraron %d sesiones que coinciden con %q:",
+		LangRussian:            "🔍 Найдено %d сессий по запросу %q:",
 	},
 	MsgSearchHint: {
 		LangEnglish:            "Use /switch <id> to switch to a session.",
@@ -2707,6 +3094,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "使用 /switch <id> 切換到對應會話。",
 		LangJapanese:           "/switch <id> でセッションを切り替え。",
 		LangSpanish:            "Usa /switch <id> para cambiar a una sesión.",
+		LangRussian:            "Используйте /switch <id> для переключения на сессию.",
 	},
 	// Builtin command descriptions
 	MsgBuiltinCmdNew: {
@@ -2715,6 +3103,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "建立新會話，參數: [名稱]",
 		LangJapanese:           "新しいセッションを開始、引数: [名前]",
 		LangSpanish:            "Iniciar una nueva sesión, arg: [nombre]",
+		LangRussian:            "Создать новую сессию, арг: [имя]",
 	},
 	MsgBuiltinCmdList: {
 		LangEnglish:            "List agent sessions",
@@ -2722,6 +3111,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "列出 Agent 會話列表",
 		LangJapanese:           "エージェントセッション一覧",
 		LangSpanish:            "Listar sesiones del agente",
+		LangRussian:            "Список сессий агента",
 	},
 	MsgBuiltinCmdSearch: {
 		LangEnglish:            "Search sessions by name or ID, arg: <keyword>",
@@ -2729,6 +3119,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "搜尋會話名稱或 ID，參數: <關鍵詞>",
 		LangJapanese:           "セッションを名前またはIDで検索、引数: <キーワード>",
 		LangSpanish:            "Buscar sesiones por nombre o ID, arg: <palabra_clave>",
+		LangRussian:            "Поиск сессий по имени или ID, арг: <ключевое_слово>",
 	},
 	MsgBuiltinCmdSwitch: {
 		LangEnglish:            "Resume a session by its list number, arg: <number>",
@@ -2736,6 +3127,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "按列表序號切換會話，參數: <序號>",
 		LangJapanese:           "リスト番号でセッションを切り替え、引数: <番号>",
 		LangSpanish:            "Reanudar sesión por su número en la lista, arg: <número>",
+		LangRussian:            "Переключиться на сессию по номеру в списке, арг: <номер>",
 	},
 	MsgBuiltinCmdDelete: {
 		LangEnglish:            "Delete session(s) by list number, args: <number> | 1,2,3 | 3-7 | 1,3-5,8",
@@ -2743,6 +3135,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "按列表序號刪除會話，參數: <序號> | 1,2,3 | 3-7 | 1,3-5,8",
 		LangJapanese:           "リスト番号でセッションを削除、引数: <番号> | 1,2,3 | 3-7 | 1,3-5,8",
 		LangSpanish:            "Eliminar sesión(es) por número de lista, args: <número> | 1,2,3 | 3-7 | 1,3-5,8",
+		LangRussian:            "Удалить сессию(и) по номеру в списке, арг: <номер> | 1,2,3 | 3-7 | 1,3-5,8",
 	},
 	MsgBuiltinCmdName: {
 		LangEnglish:            "Name a session for easy identification, arg: [number] <text>",
@@ -2750,6 +3143,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "為會話命名，方便辨識，參數: [序號] <名稱>",
 		LangJapanese:           "セッションに名前を付ける、引数: [番号] <名前>",
 		LangSpanish:            "Nombrar una sesión para fácil identificación, arg: [número] <texto>",
+		LangRussian:            "Дать имя сессии для удобства, арг: [номер] <текст>",
 	},
 	MsgBuiltinCmdCurrent: {
 		LangEnglish:            "Show current active session",
@@ -2757,6 +3151,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "查看當前活躍會話",
 		LangJapanese:           "現在のアクティブセッションを表示",
 		LangSpanish:            "Mostrar sesión activa actual",
+		LangRussian:            "Показать текущую активную сессию",
 	},
 	MsgBuiltinCmdHistory: {
 		LangEnglish:            "Show last n messages, arg: [n] (default 10)",
@@ -2764,6 +3159,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "查看最近 n 條訊息，參數: [n]（預設 10）",
 		LangJapanese:           "直近 n 件のメッセージを表示、引数: [n]（デフォルト 10）",
 		LangSpanish:            "Mostrar últimos n mensajes, arg: [n] (por defecto 10)",
+		LangRussian:            "Показать последние n сообщений, арг: [n] (по умолчанию 10)",
 	},
 	MsgBuiltinCmdProvider: {
 		LangEnglish:            "Manage API providers, arg: [list|add|remove|switch|clear]",
@@ -2771,6 +3167,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "管理 API Provider，參數: [list|add|remove|switch|clear]",
 		LangJapanese:           "API プロバイダ管理、引数: [list|add|remove|switch|clear]",
 		LangSpanish:            "Gestionar proveedores API, arg: [list|add|remove|switch|clear]",
+		LangRussian:            "Управление провайдерами API, арг: [list|add|remove|switch|clear]",
 	},
 	MsgBuiltinCmdMemory: {
 		LangEnglish:            "View/edit agent memory files, arg: [add|global|global add]",
@@ -2778,6 +3175,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "查看/編輯 Agent 記憶檔案，參數: [add|global|global add]",
 		LangJapanese:           "エージェントメモリの表示/編集、引数: [add|global|global add]",
 		LangSpanish:            "Ver/editar archivos de memoria del agente, arg: [add|global|global add]",
+		LangRussian:            "Просмотр/редактирование файлов памяти агента, арг: [add|global|global add]",
 	},
 	MsgBuiltinCmdAllow: {
 		LangEnglish:            "Pre-allow a tool (next session), arg: <tool>",
@@ -2785,6 +3183,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "預授權工具（下次會話生效），參數: <工具名>",
 		LangJapanese:           "ツールを事前許可（次のセッションで有効）、引数: <ツール>",
 		LangSpanish:            "Pre-autorizar herramienta (próxima sesión), arg: <herramienta>",
+		LangRussian:            "Предварительно разрешить инструмент (след. сессия), арг: <инструмент>",
 	},
 	MsgBuiltinCmdModel: {
 		LangEnglish:            "View/switch model, arg: [name]",
@@ -2792,6 +3191,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "查看/切換模型，參數: [名稱]",
 		LangJapanese:           "モデルの表示/切り替え、引数: [名前]",
 		LangSpanish:            "Ver/cambiar modelo, arg: [nombre]",
+		LangRussian:            "Просмотр/переключение модели, арг: [имя]",
 	},
 	MsgBuiltinCmdReasoning: {
 		LangEnglish:            "View/switch reasoning effort, arg: [level]",
@@ -2799,6 +3199,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "查看/切換推理強度，參數: [等級]",
 		LangJapanese:           "推論強度の表示/切り替え、引数: [レベル]",
 		LangSpanish:            "Ver/cambiar esfuerzo de razonamiento, arg: [nivel]",
+		LangRussian:            "Просмотр/переключение уровня рассуждений, арг: [уровень]",
 	},
 	MsgBuiltinCmdMode: {
 		LangEnglish:            "View/switch permission mode, arg: [name]",
@@ -2806,6 +3207,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "查看/切換權限模式，參數: [名稱]",
 		LangJapanese:           "権限モードの表示/切り替え、引数: [名前]",
 		LangSpanish:            "Ver/cambiar modo de permisos, arg: [nombre]",
+		LangRussian:            "Просмотр/переключение режима разрешений, арг: [имя]",
 	},
 	MsgBuiltinCmdLang: {
 		LangEnglish:            "View/switch language, arg: [en|zh|zh-TW|ja|es|auto]",
@@ -2813,6 +3215,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "查看/切換語言，參數: [en|zh|zh-TW|ja|es|auto]",
 		LangJapanese:           "言語の表示/切り替え、引数: [en|zh|zh-TW|ja|es|auto]",
 		LangSpanish:            "Ver/cambiar idioma, arg: [en|zh|zh-TW|ja|es|auto]",
+		LangRussian:            "Просмотр/переключение языка, арг: [en|zh|zh-TW|ja|es|ru|auto]",
 	},
 	MsgBuiltinCmdQuiet: {
 		LangEnglish:            "Toggle thinking/tool progress, arg: [global]",
@@ -2820,6 +3223,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "開關思考和工具進度訊息, 參數: [global]",
 		LangJapanese:           "思考/ツール進捗メッセージの表示切替, 引数: [global]",
 		LangSpanish:            "Alternar mensajes de progreso, arg: [global]",
+		LangRussian:            "Вкл/выкл сообщений о прогрессе, арг: [global]",
 	},
 	MsgBuiltinCmdCompress: {
 		LangEnglish:            "Compress conversation context",
@@ -2827,6 +3231,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "壓縮會話上下文",
 		LangJapanese:           "会話コンテキストを圧縮",
 		LangSpanish:            "Comprimir contexto de conversación",
+		LangRussian:            "Сжать контекст диалога",
 	},
 	MsgBuiltinCmdStop: {
 		LangEnglish:            "Stop current execution",
@@ -2834,6 +3239,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "停止當前執行",
 		LangJapanese:           "現在の実行を停止",
 		LangSpanish:            "Detener ejecución actual",
+		LangRussian:            "Остановить текущее выполнение",
 	},
 	MsgBuiltinCmdCron: {
 		LangEnglish:            "Manage scheduled tasks, arg: [add|list|del|enable|disable]",
@@ -2841,6 +3247,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "管理定時任務，參數: [add|list|del|enable|disable]",
 		LangJapanese:           "スケジュールタスク管理、引数: [add|list|del|enable|disable]",
 		LangSpanish:            "Gestionar tareas programadas, arg: [add|list|del|enable|disable]",
+		LangRussian:            "Управление запланированными задачами, арг: [add|list|del|enable|disable]",
 	},
 	MsgBuiltinCmdCommands: {
 		LangEnglish:            "Manage custom slash commands, arg: [add|del]",
@@ -2848,6 +3255,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "管理自訂命令，參數: [add|del]",
 		LangJapanese:           "カスタムコマンド管理、引数: [add|del]",
 		LangSpanish:            "Gestionar comandos personalizados, arg: [add|del]",
+		LangRussian:            "Управление пользовательскими командами, арг: [add|del]",
 	},
 	MsgBuiltinCmdAlias: {
 		LangEnglish:            "Manage command aliases, arg: [add|del]",
@@ -2855,6 +3263,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "管理命令別名，參數: [add|del]",
 		LangJapanese:           "コマンドエイリアス管理、引数: [add|del]",
 		LangSpanish:            "Gestionar alias de comandos, arg: [add|del]",
+		LangRussian:            "Управление алиасами команд, арг: [add|del]",
 	},
 	MsgBuiltinCmdSkills: {
 		LangEnglish:            "List agent skills (from SKILL.md)",
@@ -2862,6 +3271,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "列出 Agent Skills（來自 SKILL.md）",
 		LangJapanese:           "エージェントスキル一覧（SKILL.md から）",
 		LangSpanish:            "Listar skills del agente (desde SKILL.md)",
+		LangRussian:            "Список навыков агента (из SKILL.md)",
 	},
 	MsgBuiltinCmdConfig: {
 		LangEnglish:            "View/update runtime configuration, arg: [get|set|reload] [key] [value]",
@@ -2869,6 +3279,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "查看/修改執行階段配置，參數: [get|set|reload] [鍵] [值]",
 		LangJapanese:           "ランタイム設定の表示/変更、引数: [get|set|reload] [キー] [値]",
 		LangSpanish:            "Ver/actualizar configuración en tiempo de ejecución, arg: [get|set|reload] [clave] [valor]",
+		LangRussian:            "Просмотр/изменение настроек, арг: [get|set|reload] [ключ] [значение]",
 	},
 	MsgBuiltinCmdDoctor: {
 		LangEnglish:            "Run system diagnostics",
@@ -2876,6 +3287,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "執行系統診斷",
 		LangJapanese:           "システム診断を実行",
 		LangSpanish:            "Ejecutar diagnósticos del sistema",
+		LangRussian:            "Запустить диагностику системы",
 	},
 	MsgBuiltinCmdUpgrade: {
 		LangEnglish:            "Check for updates and self-update",
@@ -2883,6 +3295,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "檢查更新並自動升級",
 		LangJapanese:           "アップデートを確認して自動更新",
 		LangSpanish:            "Buscar actualizaciones y auto-actualizar",
+		LangRussian:            "Проверить обновления и обновиться",
 	},
 	MsgBuiltinCmdRestart: {
 		LangEnglish:            "Restart cc-connect service",
@@ -2890,6 +3303,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "重啟 cc-connect 服務",
 		LangJapanese:           "cc-connect サービスを再起動",
 		LangSpanish:            "Reiniciar el servicio cc-connect",
+		LangRussian:            "Перезапустить сервис cc-connect",
 	},
 	MsgBuiltinCmdStatus: {
 		LangEnglish:            "Show system status",
@@ -2897,6 +3311,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "查看系統狀態",
 		LangJapanese:           "システム状態を表示",
 		LangSpanish:            "Mostrar estado del sistema",
+		LangRussian:            "Показать статус системы",
 	},
 	MsgBuiltinCmdUsage: {
 		LangEnglish:            "Show account/model quota usage",
@@ -2904,6 +3319,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "查看帳號/模型限額使用情況",
 		LangJapanese:           "アカウント/モデル使用量を表示",
 		LangSpanish:            "Mostrar uso de cuota de cuenta/modelo",
+		LangRussian:            "Показать использование квоты аккаунта/модели",
 	},
 	MsgBuiltinCmdVersion: {
 		LangEnglish:            "Show cc-connect version",
@@ -2911,6 +3327,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "查看 cc-connect 版本",
 		LangJapanese:           "cc-connect のバージョンを表示",
 		LangSpanish:            "Mostrar versión de cc-connect",
+		LangRussian:            "Показать версию cc-connect",
 	},
 	MsgBuiltinCmdHelp: {
 		LangEnglish:            "Show this help",
@@ -2918,6 +3335,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "顯示此說明",
 		LangJapanese:           "このヘルプを表示",
 		LangSpanish:            "Mostrar esta ayuda",
+		LangRussian:            "Показать эту справку",
 	},
 	MsgBuiltinCmdBind: {
 		LangEnglish:            "Bind current session to a target, arg: <target>",
@@ -2925,6 +3343,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "綁定當前會話到目標，參數: <目標>",
 		LangJapanese:           "現在のセッションをターゲットにバインド、引数: <ターゲット>",
 		LangSpanish:            "Vincular sesión actual a un objetivo, arg: <objetivo>",
+		LangRussian:            "Привязать сессию к цели, аргумент: <цель>",
 	},
 	MsgBuiltinCmdShell: {
 		LangEnglish:            "Run a shell command, arg: <command>",
@@ -2932,6 +3351,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "執行 Shell 命令，參數: <命令>",
 		LangJapanese:           "シェルコマンドを実行、引数: <コマンド>",
 		LangSpanish:            "Ejecutar un comando shell, arg: <comando>",
+		LangRussian:            "Выполнить shell-команду, аргумент: <команда>",
 	},
 
 	// Multi-workspace messages
@@ -2941,6 +3361,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "工作區命令僅在多工作區模式下可用。",
 		LangJapanese:           "ワークスペースコマンドはマルチワークスペースモードでのみ使用できます。",
 		LangSpanish:            "Los comandos de workspace solo están disponibles en modo multi-workspace.",
+		LangRussian:            "Команды рабочего пространства доступны только в режиме мультирабочего пространства.",
 	},
 	MsgWsNoBinding: {
 		LangEnglish:            "No workspace bound to this channel.",
@@ -2948,6 +3369,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "此頻道未綁定工作區。",
 		LangJapanese:           "このチャンネルにワークスペースがバインドされていません。",
 		LangSpanish:            "No hay workspace vinculado a este canal.",
+		LangRussian:            "К этому каналу не привязано рабочее пространство.",
 	},
 	MsgWsInfo: {
 		LangEnglish:            "Workspace: `%s`\nBound: %s",
@@ -2955,6 +3377,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "工作區: `%s`\n綁定時間: %s",
 		LangJapanese:           "ワークスペース: `%s`\nバインド: %s",
 		LangSpanish:            "Workspace: `%s`\nVinculado: %s",
+		LangRussian:            "Рабочее пространство: `%s`\nПривязано: %s",
 	},
 	MsgWsInitUsage: {
 		LangEnglish:            "Usage: `/workspace init <git-url>`",
@@ -2962,6 +3385,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法: `/workspace init <git倉庫地址>`",
 		LangJapanese:           "使い方: `/workspace init <git-url>`",
 		LangSpanish:            "Uso: `/workspace init <git-url>`",
+		LangRussian:            "Использование: `/workspace init <git-url>`",
 	},
 	MsgWsBindUsage: {
 		LangEnglish:            "Usage: `/workspace bind <workspace-name>`",
@@ -2969,6 +3393,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "用法: `/workspace bind <工作區名稱>`",
 		LangJapanese:           "使い方: `/workspace bind <ワークスペース名>`",
 		LangSpanish:            "Uso: `/workspace bind <nombre-workspace>`",
+		LangRussian:            "Использование: `/workspace bind <имя-рабочего-пространства>`",
 	},
 	MsgWsBindSuccess: {
 		LangEnglish:            "✅ Workspace bound: `%s`",
@@ -2976,6 +3401,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 工作區綁定成功: `%s`",
 		LangJapanese:           "✅ ワークスペースをバインドしました: `%s`",
 		LangSpanish:            "✅ Workspace vinculado: `%s`",
+		LangRussian:            "✅ Рабочее пространство привязано: `%s`",
 	},
 	MsgWsBindNotFound: {
 		LangEnglish:            "Workspace not found: `%s`",
@@ -2983,6 +3409,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "工作區不存在: `%s`",
 		LangJapanese:           "ワークスペースが見つかりません: `%s`",
 		LangSpanish:            "Workspace no encontrado: `%s`",
+		LangRussian:            "Рабочее пространство не найдено: `%s`",
 	},
 	MsgWsUnbindSuccess: {
 		LangEnglish:            "✅ Workspace unbound.",
@@ -2990,6 +3417,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 已解除工作區綁定。",
 		LangJapanese:           "✅ ワークスペースのバインドを解除しました。",
 		LangSpanish:            "✅ Workspace desvinculado.",
+		LangRussian:            "✅ Привязка рабочего пространства снята.",
 	},
 	MsgWsListEmpty: {
 		LangEnglish:            "No workspaces bound.",
@@ -2997,6 +3425,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "沒有綁定的工作區。",
 		LangJapanese:           "バインドされたワークスペースがありません。",
 		LangSpanish:            "No hay workspaces vinculados.",
+		LangRussian:            "Нет привязанных рабочих пространств.",
 	},
 	MsgWsListTitle: {
 		LangEnglish:            "Bound workspaces:",
@@ -3004,6 +3433,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "已綁定的工作區：",
 		LangJapanese:           "バインドされたワークスペース：",
 		LangSpanish:            "Workspaces vinculados:",
+		LangRussian:            "Привязанные рабочие пространства:",
 	},
 	MsgWsNotFoundHint: {
 		LangEnglish:            "No workspace found for this channel. Send me a git repo URL to clone, or use `/workspace init <url>`.",
@@ -3011,6 +3441,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "此頻道未找到工作區。請發送 git 倉庫地址進行克隆，或使用 `/workspace init <倉庫地址>`。",
 		LangJapanese:           "このチャンネルにワークスペースが見つかりません。gitリポジトリURLを送信するか、`/workspace init <url>` を使用してください。",
 		LangSpanish:            "No se encontró workspace para este canal. Envía una URL de repo git para clonar, o usa `/workspace init <url>`.",
+		LangRussian:            "Рабочее пространство для этого канала не найдено. Отправьте URL git-репозитория для клонирования или используйте `/workspace init <url>`.",
 	},
 	MsgWsResolutionError: {
 		LangEnglish:            "Workspace resolution error: %v",
@@ -3018,6 +3449,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "工作區解析錯誤: %v",
 		LangJapanese:           "ワークスペース解決エラー: %v",
 		LangSpanish:            "Error de resolución de workspace: %v",
+		LangRussian:            "Ошибка разрешения рабочего пространства: %v",
 	},
 	MsgWsCloneProgress: {
 		LangEnglish:            "🔄 Cloning repository: %s",
@@ -3025,6 +3457,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔄 正在克隆倉庫: %s",
 		LangJapanese:           "🔄 リポジトリをクローン中: %s",
 		LangSpanish:            "🔄 Clonando repositorio: %s",
+		LangRussian:            "🔄 Клонирование репозитория: %s",
 	},
 	MsgWsCloneSuccess: {
 		LangEnglish:            "✅ Repository cloned successfully: `%s`",
@@ -3032,6 +3465,7 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 倉庫克隆成功: `%s`",
 		LangJapanese:           "✅ リポジトリのクローンに成功しました: `%s`",
 		LangSpanish:            "✅ Repositorio clonado exitosamente: `%s`",
+		LangRussian:            "✅ Репозиторий успешно клонирован: `%s`",
 	},
 	MsgWsCloneFailed: {
 		LangEnglish:            "❌ Failed to clone repository: %v",
@@ -3039,6 +3473,73 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "❌ 克隆倉庫失敗: %v",
 		LangJapanese:           "❌ リポジトリのクローンに失敗しました: %v",
 		LangSpanish:            "❌ Error al clonar repositorio: %v",
+		LangRussian:            "❌ Не удалось клонировать репозиторий: %v",
+	},
+
+	// ── Message queue ──────────────────────────────────────────────
+	MsgQueueTitle: {
+		LangEnglish:            "📋 Queue:",
+		LangChinese:            "📋 队列：",
+		LangTraditionalChinese: "📋 佇列：",
+		LangJapanese:           "📋 キュー：",
+		LangSpanish:            "📋 Cola:",
+		LangRussian:            "📋 Очередь:",
+	},
+	MsgQueueFull: {
+		LangEnglish:            "⚠️ Message queue is full (%d). Please wait for the current request to finish.",
+		LangChinese:            "⚠️ 消息队列已满 (%d)。请等待当前请求完成。",
+		LangTraditionalChinese: "⚠️ 訊息佇列已滿 (%d)。請等待當前請求完成。",
+		LangJapanese:           "⚠️ メッセージキューが満杯です (%d)。現在のリクエストが完了するまでお待ちください。",
+		LangSpanish:            "⚠️ La cola de mensajes está llena (%d). Espere a que termine la solicitud actual.",
+		LangRussian:            "⚠️ Очередь сообщений заполнена (%d). Дождитесь завершения текущего запроса.",
+	},
+	MsgQueueConfirm: {
+		LangEnglish:            "Process next: \"%s\"?",
+		LangChinese:            "处理下一条: \"%s\"？",
+		LangTraditionalChinese: "處理下一條: \"%s\"？",
+		LangJapanese:           "次を処理: \"%s\"？",
+		LangSpanish:            "¿Procesar siguiente: \"%s\"?",
+		LangRussian:            "Обработать: «%s»?",
+	},
+	MsgQueueBtnYes: {
+		LangEnglish:            "▶️ Yes",
+		LangChinese:            "▶️ 是",
+		LangTraditionalChinese: "▶️ 是",
+		LangJapanese:           "▶️ はい",
+		LangSpanish:            "▶️ Sí",
+		LangRussian:            "▶️ Да",
+	},
+	MsgQueueBtnSkip: {
+		LangEnglish:            "⏭ Skip",
+		LangChinese:            "⏭ 跳过",
+		LangTraditionalChinese: "⏭ 跳過",
+		LangJapanese:           "⏭ スキップ",
+		LangSpanish:            "⏭ Omitir",
+		LangRussian:            "⏭ Пропустить",
+	},
+	MsgQueueBtnClear: {
+		LangEnglish:            "🗑 Clear",
+		LangChinese:            "🗑 清空",
+		LangTraditionalChinese: "🗑 清空",
+		LangJapanese:           "🗑 クリア",
+		LangSpanish:            "🗑 Limpiar",
+		LangRussian:            "🗑 Очистить",
+	},
+	MsgQueueCleared: {
+		LangEnglish:            "🗑 Queue cleared.",
+		LangChinese:            "🗑 队列已清空。",
+		LangTraditionalChinese: "🗑 佇列已清空。",
+		LangJapanese:           "🗑 キューをクリアしました。",
+		LangSpanish:            "🗑 Cola limpiada.",
+		LangRussian:            "🗑 Очередь очищена.",
+	},
+	MsgQueueSkipped: {
+		LangEnglish:            "⏭ Skipped: \"%s\"",
+		LangChinese:            "⏭ 已跳过: \"%s\"",
+		LangTraditionalChinese: "⏭ 已跳過: \"%s\"",
+		LangJapanese:           "⏭ スキップ: \"%s\"",
+		LangSpanish:            "⏭ Omitido: \"%s\"",
+		LangRussian:            "⏭ Пропущено: «%s»",
 	},
 }
 

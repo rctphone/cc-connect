@@ -192,6 +192,26 @@ type workspaceInitFlow struct {
 	channelName string
 }
 
+// queuedMessage represents a user message waiting in the queue while the agent is busy.
+type queuedMessage struct {
+	msg            *Message
+	agent          Agent
+	sessions       *SessionManager
+	interactiveKey string
+	workspaceDir   string
+	queuedAt       time.Time
+}
+
+// messageQueue holds buffered messages for a busy session.
+type messageQueue struct {
+	items          []*queuedMessage
+	maxSize        int  // default 10
+	pinnedHandle   any  // handle from PinnableMessage.SendAndPin
+	confirmPending bool // waiting for user to confirm next queue item
+}
+
+const defaultQueueMaxSize = 10
+
 // interactiveState tracks a running interactive agent session and its permission state.
 type interactiveState struct {
 	agentSession AgentSession
@@ -204,6 +224,7 @@ type interactiveState struct {
 	quiet        bool // when true, suppress thinking and tool progress for this session
 	fromVoice    bool // true if current turn originated from voice transcription
 	deleteMode   *deleteModeState
+	queue        messageQueue
 }
 
 type deleteModeState struct {
@@ -922,6 +943,11 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		return
 	}
 
+	// Queue responses bypass the session lock
+	if e.handleQueueResponse(p, msg, content) {
+		return
+	}
+
 	// Select session manager and agent based on workspace mode
 	sessions := e.sessions
 	agent := e.agent
@@ -934,7 +960,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 
 	session := sessions.GetOrCreateActive(msg.SessionKey)
 	if !session.TryLock() {
-		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPreviousProcessing))
+		e.enqueueMessage(p, msg, agent, sessions, interactiveKey, resolvedWorkspace)
 		return
 	}
 
@@ -1249,10 +1275,11 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 		state.mu.Unlock()
 	}
 
-	// Update reply context for this turn
+	// Update reply context for this turn; reset queue confirmation if any
 	state.mu.Lock()
 	state.platform = p
 	state.replyCtx = msg.ReplyCtx
+	state.queue.confirmPending = false
 	state.mu.Unlock()
 
 	if state.agentSession == nil {
@@ -1490,6 +1517,25 @@ func (e *Engine) cleanupInteractiveState(sessionKey string, expected ...*interac
 	delete(e.interactiveStates, sessionKey)
 	e.interactiveMu.Unlock()
 
+	// Clean up queue pinned message if any
+	if ok && state != nil {
+		state.mu.Lock()
+		pinnedHandle := state.queue.pinnedHandle
+		p := state.platform
+		state.queue.items = nil
+		state.queue.pinnedHandle = nil
+		state.queue.confirmPending = false
+		state.mu.Unlock()
+
+		if pinnedHandle != nil {
+			if pinner, ok := p.(PinnableMessage); ok {
+				if err := pinner.Unpin(e.ctx, pinnedHandle); err != nil {
+					slog.Debug("cleanupInteractiveState: unpin failed", "error", err)
+				}
+			}
+		}
+	}
+
 	if ok && state != nil && state.agentSession != nil {
 		slog.Debug("cleanupInteractiveState: closing agent session", "session", sessionKey)
 		closeStart := time.Now()
@@ -1509,6 +1555,277 @@ func (e *Engine) cleanupInteractiveState(sessionKey string, expected ...*interac
 			slog.Error("agent session close timed out (10s), abandoning", "session", sessionKey)
 		}
 	}
+}
+
+// ──────────────────────────────────────────────────────────────
+// Message queue
+// ──────────────────────────────────────────────────────────────
+
+// enqueueMessage adds a message to the queue for later processing.
+// Called when TryLock fails (agent is busy).
+func (e *Engine) enqueueMessage(p Platform, msg *Message, agent Agent, sessions *SessionManager, interactiveKey string, workspaceDir string) {
+	e.interactiveMu.Lock()
+	state, ok := e.interactiveStates[interactiveKey]
+	e.interactiveMu.Unlock()
+
+	if !ok || state == nil {
+		// No active session — can't queue, fall back to old behavior
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPreviousProcessing))
+		return
+	}
+
+	state.mu.Lock()
+	maxSize := state.queue.maxSize
+	if maxSize == 0 {
+		maxSize = defaultQueueMaxSize
+	}
+	if len(state.queue.items) >= maxSize {
+		state.mu.Unlock()
+		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgQueueFull), maxSize))
+		return
+	}
+
+	state.queue.items = append(state.queue.items, &queuedMessage{
+		msg:            msg,
+		agent:          agent,
+		sessions:       sessions,
+		interactiveKey: interactiveKey,
+		workspaceDir:   workspaceDir,
+		queuedAt:       time.Now(),
+	})
+	queueLen := len(state.queue.items)
+	state.mu.Unlock()
+
+	slog.Info("message enqueued", "session", interactiveKey, "queue_len", queueLen, "user", msg.UserName)
+	e.updateQueueDisplay(state, p, msg.ReplyCtx)
+}
+
+// updateQueueDisplay creates or updates the pinned queue message.
+func (e *Engine) updateQueueDisplay(state *interactiveState, p Platform, replyCtx any) {
+	state.mu.Lock()
+	items := make([]*queuedMessage, len(state.queue.items))
+	copy(items, state.queue.items)
+	pinnedHandle := state.queue.pinnedHandle
+	state.mu.Unlock()
+
+	if len(items) == 0 {
+		// Queue empty — unpin if needed
+		if pinnedHandle != nil {
+			if pinner, ok := p.(PinnableMessage); ok {
+				pinner.Unpin(e.ctx, pinnedHandle)
+			}
+			state.mu.Lock()
+			state.queue.pinnedHandle = nil
+			state.mu.Unlock()
+		}
+		return
+	}
+
+	// Build queue text
+	var sb strings.Builder
+	sb.WriteString(e.i18n.T(MsgQueueTitle))
+	sb.WriteString("\n")
+	for i, item := range items {
+		preview := truncateStr(item.msg.Content, 60)
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, preview))
+	}
+
+	text := sb.String()
+
+	pinner, canPin := p.(PinnableMessage)
+
+	if pinnedHandle != nil && canPin {
+		if err := pinner.EditPinned(e.ctx, pinnedHandle, text); err != nil {
+			slog.Debug("updateQueueDisplay: edit pinned failed", "error", err)
+		}
+	} else if canPin {
+		handle, err := pinner.SendAndPin(e.ctx, replyCtx, text)
+		if err != nil {
+			slog.Debug("updateQueueDisplay: send and pin failed", "error", err)
+			// Fall back to regular send
+			e.send(p, replyCtx, text)
+		} else {
+			state.mu.Lock()
+			state.queue.pinnedHandle = handle
+			state.mu.Unlock()
+		}
+	} else {
+		// Platform doesn't support pinning — just send
+		e.send(p, replyCtx, text)
+	}
+}
+
+// processNextInQueue checks the queue after the agent finishes and prompts the user.
+func (e *Engine) processNextInQueue(interactiveKey string) {
+	e.interactiveMu.Lock()
+	state, ok := e.interactiveStates[interactiveKey]
+	e.interactiveMu.Unlock()
+
+	if !ok || state == nil {
+		return
+	}
+
+	state.mu.Lock()
+	if len(state.queue.items) == 0 {
+		state.mu.Unlock()
+		return
+	}
+	next := state.queue.items[0]
+	state.queue.confirmPending = true
+	p := state.platform
+	replyCtx := state.replyCtx
+	state.mu.Unlock()
+
+	preview := truncateStr(next.msg.Content, 80)
+	confirmText := fmt.Sprintf(e.i18n.T(MsgQueueConfirm), preview)
+
+	buttons := [][]ButtonOption{
+		{
+			{Text: e.i18n.T(MsgQueueBtnYes), Data: "queue:yes"},
+			{Text: e.i18n.T(MsgQueueBtnSkip), Data: "queue:skip"},
+			{Text: e.i18n.T(MsgQueueBtnClear), Data: "queue:clear"},
+		},
+	}
+
+	if sender, ok := p.(InlineButtonSender); ok {
+		if err := sender.SendWithButtons(e.ctx, replyCtx, confirmText, buttons); err != nil {
+			slog.Error("processNextInQueue: send buttons failed", "error", err)
+			e.send(p, replyCtx, confirmText)
+		}
+	} else {
+		e.send(p, replyCtx, confirmText)
+	}
+}
+
+// handleQueueResponse handles queue callback button presses (queue:yes, queue:skip, queue:clear).
+// Returns true if the message was a queue response and was handled.
+func (e *Engine) handleQueueResponse(p Platform, msg *Message, content string) bool {
+	if !strings.HasPrefix(content, "queue:") {
+		return false
+	}
+
+	action := strings.TrimPrefix(content, "queue:")
+
+	// Find the interactiveState for this session
+	interactiveKey := e.findQueueInteractiveKey(msg.SessionKey)
+	if interactiveKey == "" {
+		return false
+	}
+
+	e.interactiveMu.Lock()
+	state, ok := e.interactiveStates[interactiveKey]
+	e.interactiveMu.Unlock()
+
+	if !ok || state == nil {
+		return false
+	}
+
+	state.mu.Lock()
+	if !state.queue.confirmPending {
+		state.mu.Unlock()
+		return false
+	}
+	state.queue.confirmPending = false
+
+	switch action {
+	case "yes":
+		if len(state.queue.items) == 0 {
+			state.mu.Unlock()
+			return true
+		}
+		queued := state.queue.items[0]
+		state.queue.items = state.queue.items[1:]
+		state.mu.Unlock()
+
+		// Update the queue display
+		e.updateQueueDisplay(state, p, msg.ReplyCtx)
+
+		// Process the queued message
+		session := queued.sessions.GetOrCreateActive(queued.msg.SessionKey)
+		if !session.TryLock() {
+			// Session got busy again — re-enqueue at front
+			state.mu.Lock()
+			state.queue.items = append([]*queuedMessage{queued}, state.queue.items...)
+			state.mu.Unlock()
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPreviousProcessing))
+			return true
+		}
+
+		slog.Info("processing queued message",
+			"session", queued.interactiveKey,
+			"user", queued.msg.UserName,
+			"queued_for", time.Since(queued.queuedAt),
+		)
+
+		// Update reply context on the queued message to use the latest one
+		queued.msg.ReplyCtx = msg.ReplyCtx
+
+		go e.processInteractiveMessageWith(p, queued.msg, session, queued.agent, queued.interactiveKey, queued.workspaceDir)
+
+	case "skip":
+		if len(state.queue.items) == 0 {
+			state.mu.Unlock()
+			return true
+		}
+		skipped := state.queue.items[0]
+		state.queue.items = state.queue.items[1:]
+		state.mu.Unlock()
+
+		preview := truncateStr(skipped.msg.Content, 60)
+		e.send(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgQueueSkipped), preview))
+
+		// Update queue display and prompt for next
+		e.updateQueueDisplay(state, p, msg.ReplyCtx)
+		go e.processNextInQueue(interactiveKey)
+
+	case "clear":
+		state.queue.items = nil
+		pinnedHandle := state.queue.pinnedHandle
+		state.queue.pinnedHandle = nil
+		state.mu.Unlock()
+
+		if pinnedHandle != nil {
+			if pinner, ok := p.(PinnableMessage); ok {
+				pinner.Unpin(e.ctx, pinnedHandle)
+			}
+		}
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgQueueCleared))
+
+	default:
+		state.mu.Unlock()
+	}
+
+	return true
+}
+
+// findQueueInteractiveKey finds the interactiveKey for a given sessionKey that has a queue.
+func (e *Engine) findQueueInteractiveKey(sessionKey string) string {
+	e.interactiveMu.Lock()
+	defer e.interactiveMu.Unlock()
+
+	// Direct match first
+	if state, ok := e.interactiveStates[sessionKey]; ok {
+		state.mu.Lock()
+		hasQueue := len(state.queue.items) > 0 || state.queue.confirmPending
+		state.mu.Unlock()
+		if hasQueue {
+			return sessionKey
+		}
+	}
+
+	// Search for workspace-prefixed keys
+	for key, state := range e.interactiveStates {
+		if strings.HasSuffix(key, ":"+sessionKey) {
+			state.mu.Lock()
+			hasQueue := len(state.queue.items) > 0 || state.queue.confirmPending
+			state.mu.Unlock()
+			if hasQueue {
+				return key
+			}
+		}
+	}
+
+	return ""
 }
 
 const defaultEventIdleTimeout = 2 * time.Hour
@@ -1862,6 +2179,9 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					go e.sendTTSReply(p, replyCtx, fullResponse)
 				}
 			}
+
+			// Check message queue for pending items
+			go e.processNextInQueue(sessionKey)
 
 			return
 
@@ -6225,7 +6545,8 @@ func (e *Engine) executeCustomCommand(p Platform, msg *Message, cmd *CustomComma
 
 	session := e.sessions.GetOrCreateActive(msg.SessionKey)
 	if !session.TryLock() {
-		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPreviousProcessing))
+		msg.Content = prompt
+		e.enqueueMessage(p, msg, e.agent, e.sessions, msg.SessionKey, "")
 		return
 	}
 
@@ -6468,7 +6789,8 @@ func (e *Engine) executeSkill(p Platform, msg *Message, skill *Skill, args []str
 
 	session := e.sessions.GetOrCreateActive(msg.SessionKey)
 	if !session.TryLock() {
-		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPreviousProcessing))
+		msg.Content = prompt
+		e.enqueueMessage(p, msg, e.agent, e.sessions, msg.SessionKey, "")
 		return
 	}
 
@@ -7145,6 +7467,13 @@ func compactToolInput(toolName, toolInput string, maxLen int, workDir string) st
 	}
 	input = strings.TrimSpace(input)
 
+	// For JSON tool inputs, extract the primary text value to avoid showing raw JSON.
+	// e.g. {"query":"iPhone 12 купить"} → iPhone 12 купить
+	// e.g. {"prompt":"Найди все..."} → Найди все...
+	if extracted := extractJSONPrimaryValue(input); extracted != "" {
+		input = extracted
+	}
+
 	// Shorten paths: strip work_dir prefix, use basename for binaries
 	input = shortenPaths(input, workDir, toolName)
 
@@ -7155,6 +7484,34 @@ func compactToolInput(toolName, toolInput string, maxLen int, workDir string) st
 	}
 
 	return "`" + input + "`"
+}
+
+// extractJSONPrimaryValue extracts the main text value from a JSON tool input.
+// This makes compact tool display much more readable by showing the actual
+// content instead of raw JSON. Looks for common primary-value field names
+// in priority order. Only extracts if the value is a non-empty string.
+func extractJSONPrimaryValue(input string) string {
+	trimmed := strings.TrimSpace(input)
+	if len(trimmed) < 2 || trimmed[0] != '{' {
+		return ""
+	}
+	var parsed map[string]any
+	if json.Unmarshal([]byte(trimmed), &parsed) != nil {
+		return ""
+	}
+	// Priority order: the most "content-like" field wins
+	for _, key := range []string{
+		"query", "prompt", "pattern", "search_query", "q",
+		"command", "content", "text", "message", "url",
+		"file_path", "path",
+	} {
+		if v, ok := parsed[key]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 // shortenPaths makes paths in tool input more compact:

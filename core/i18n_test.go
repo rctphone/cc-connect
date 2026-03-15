@@ -53,3 +53,45 @@ func TestI18n_AllKeysHaveEnglish(t *testing.T) {
 		}
 	}
 }
+
+func TestI18n_Russian(t *testing.T) {
+	i := NewI18n(LangRussian)
+	got := i.T(MsgStarting)
+	if got == "" {
+		t.Error("expected non-empty message")
+	}
+	if got == "⏳ Processing..." {
+		t.Error("expected Russian translation, got English")
+	}
+}
+
+func TestDetectLanguage_Russian(t *testing.T) {
+	tests := []struct {
+		input string
+		want  Language
+	}{
+		{"Привет мир", LangRussian},
+		{"Обработай запрос", LangRussian},
+		{"Hello world", LangEnglish},
+		{"こんにちは", LangJapanese},
+		{"你好", LangChinese},
+	}
+	for _, tt := range tests {
+		got := DetectLanguage(tt.input)
+		if got != tt.want {
+			t.Errorf("DetectLanguage(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestI18n_QueueMessages(t *testing.T) {
+	for _, lang := range []Language{LangEnglish, LangRussian, LangChinese, LangJapanese, LangSpanish} {
+		i := NewI18n(lang)
+		for _, key := range []MsgKey{MsgQueueTitle, MsgQueueFull, MsgQueueConfirm, MsgQueueBtnYes, MsgQueueBtnSkip, MsgQueueBtnClear, MsgQueueCleared, MsgQueueSkipped} {
+			got := i.T(key)
+			if got == "" || got == string(key) {
+				t.Errorf("lang=%q key=%q: expected translation, got %q", lang, key, got)
+			}
+		}
+	}
+}
