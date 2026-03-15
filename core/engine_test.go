@@ -2884,6 +2884,22 @@ func TestParseQueuePin_Empty(t *testing.T) {
 	}
 }
 
+func TestFormatParseQueuePin_TrickyContent(t *testing.T) {
+	// Content starting with "N. " should survive roundtrip
+	items := []string{"5. этаж", "1. купи молоко\n2. купи хлеб", "normal"}
+	text := formatQueuePin(items)
+	parsed := parseQueuePin(text)
+	if len(parsed) != 3 {
+		t.Fatalf("expected 3 items, got %d: %v", len(parsed), parsed)
+	}
+	if parsed[0] != "5. этаж" {
+		t.Fatalf("expected '5. этаж', got %q", parsed[0])
+	}
+	if parsed[1] != "1. купи молоко\n2. купи хлеб" {
+		t.Fatalf("expected multiline with dots preserved, got %q", parsed[1])
+	}
+}
+
 func TestEnqueueMessage_AddsToQueue(t *testing.T) {
 	e := newTestEngine()
 	p := &stubPinnablePlatform{stubInlineButtonPlatform: stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}

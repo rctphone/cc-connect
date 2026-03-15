@@ -239,12 +239,22 @@ func parseQueuePin(content string) []string {
 		if line == "" {
 			continue
 		}
-		// Strip "N. " prefix
-		idx := strings.Index(line, ". ")
-		if idx > 0 {
-			item := line[idx+2:]
-			item = strings.ReplaceAll(item, queueItemSep, "\n")
-			items = append(items, item)
+		// Strip "N. " prefix — only strip leading digits followed by ". "
+		// to avoid mangling user content that contains ". "
+		dotIdx := strings.Index(line, ". ")
+		if dotIdx > 0 && dotIdx <= 3 { // up to 999 items
+			allDigits := true
+			for _, c := range line[:dotIdx] {
+				if c < '0' || c > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				item := line[dotIdx+2:]
+				item = strings.ReplaceAll(item, queueItemSep, "\n")
+				items = append(items, item)
+			}
 		}
 	}
 	return items
