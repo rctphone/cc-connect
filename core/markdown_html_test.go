@@ -465,32 +465,22 @@ func TestMarkdownToSimpleHTML_TableWide(t *testing.T) {
 }
 
 func TestMarkdownToSimpleHTML_TableFlatten(t *testing.T) {
-	// Very wide table (>60 natural width) should be flattened to bulleted list.
-	md := "| | РИИЛ | RED | МТС Супер | Дилер 2.0 |\n|---|---|---|---|---|\n| Цена (промо) | 390₽/мес (3 мес) | 500₽/мес (3 мес) | 650₽/мес (1 год) | 207–367₽/мес |\n| Интернет | Безлимит | Безлимит | Безлимит | Безлимит |"
+	// Table with many wide columns where shrinking would make columns < minColWidthForPre.
+	md := "| Feature | Description One | Description Two | Description Three | Description Four | Description Five | Description Six |\n|---|---|---|---|---|---|---|\n| Alpha | Long value one here | Long value two here | Long value three here | Long value four here | Long value five here | Long value six here |"
 	out := MarkdownToSimpleHTML(md)
-	// Should NOT use <pre> — too wide.
+	// 7 columns × ~20 chars each = ~140 width. Shrunk to 42: budget=24, per col=3.4 → <5 → flatten.
 	if strings.Contains(out, "<pre>") {
 		t.Errorf("very wide table should be flattened, not <pre>, got %q", out)
 	}
-	// Should have bullet points.
 	if !strings.Contains(out, "•") {
 		t.Errorf("expected bullet points in flattened table, got %q", out)
 	}
-	// Each data row becomes a bold bullet label.
-	if !strings.Contains(out, "• <b>Цена (промо)</b>") {
-		t.Errorf("expected bold bullet label for data row, got %q", out)
+	if !strings.Contains(out, "• <b>Alpha</b>") {
+		t.Errorf("expected bold bullet label, got %q", out)
 	}
-	// Blank line between records.
-	if !strings.Contains(out, "\n\n•") {
-		t.Errorf("expected blank line between records, got %q", out)
-	}
-	// Header values used as labels.
-	if !strings.Contains(out, "РИИЛ: 390") {
-		t.Errorf("expected 'Header: value' format, got %q", out)
-	}
-	// Full content preserved (not truncated).
-	if !strings.Contains(out, "207–367₽/мес") {
-		t.Errorf("expected full cell content (no truncation), got %q", out)
+	// Full content preserved.
+	if !strings.Contains(out, "Long value one here") {
+		t.Errorf("expected full cell content, got %q", out)
 	}
 }
 

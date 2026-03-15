@@ -10,10 +10,10 @@ import (
 // to inline-formatted text. 42 fits iPhone 14+ and most Android devices.
 const maxPreTableWidth = 42
 
-// maxFlattenThreshold is the natural table width above which tables are
-// "flattened" — each data row becomes a bulleted record with header labels
-// instead of a truncated grid. This preserves full cell content.
-const maxFlattenThreshold = 60
+// minColWidthForPre is the minimum display width per column in a <pre> table.
+// If shrinking columns to fit maxPreTableWidth would make any column narrower
+// than this, the table is "flattened" into a bulleted record list instead.
+const minColWidthForPre = 5
 
 // MarkdownToSimpleHTML converts common Markdown to a simplified HTML subset.
 // Supported tags: <b>, <i>, <s>, <code>, <pre>, <a href="">, <blockquote>.
@@ -117,16 +117,27 @@ func MarkdownToSimpleHTML(md string) string {
 		}
 		totalWidth += (nCols - 1) * 3
 
-		if totalWidth > maxFlattenThreshold && len(rows) > 1 {
-			// Very wide table → flatten each row into a bulleted list.
-			renderTableFlat(&b, rows, hasFormatting)
-		} else if hasFormatting {
-			// Branch C: inline formatting preserved.
+		if hasFormatting && totalWidth <= maxPreTableWidth {
+			// Formatting in data cells + fits on screen → inline HTML.
 			renderTableInline(&b, rows)
 		} else if totalWidth > maxPreTableWidth {
-			// Moderately wide → <pre> with truncation.
+			// Wide table — try to shrink for <pre>.
+			origWidths := make([]int, nCols)
+			copy(origWidths, colWidths)
 			shrinkColumns(colWidths, nCols, maxPreTableWidth)
-			renderTablePre(&b, rows, colWidths)
+			// Flatten only if a column that was wide enough got shrunk below minimum.
+			tooNarrow := false
+			for c, w := range colWidths {
+				if w < minColWidthForPre && origWidths[c] >= minColWidthForPre {
+					tooNarrow = true
+					break
+				}
+			}
+			if tooNarrow && len(rows) > 1 {
+				renderTableFlat(&b, rows, hasFormatting)
+			} else {
+				renderTablePre(&b, rows, colWidths)
+			}
 		} else {
 			// Fits within budget → <pre> as-is.
 			renderTablePre(&b, rows, colWidths)
