@@ -1827,7 +1827,10 @@ func (e *Engine) handleQueueResponse(p Platform, msg *Message, content string) b
 	}
 
 	state.mu.Lock()
-	if !state.queue.confirmPending {
+	// Accept queue responses if confirmation is pending OR if there are queued
+	// items. The latter handles the race where the user clicks a button before
+	// processNextInQueue (launched via goroutine) has set confirmPending=true.
+	if !state.queue.confirmPending && state.queue.cachedContent == "" {
 		state.mu.Unlock()
 		return false
 	}
