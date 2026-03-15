@@ -1121,10 +1121,12 @@ func (p *Platform) RegisterCommands(commands []core.BotCommandInfo) error {
 		})
 	}
 
-	// Telegram allows at most 100 commands. Stay well below to avoid edge cases.
-	const maxTelegramCommands = 80
+	// Telegram nominally allows 100, but BOT_COMMANDS_TOO_MUCH can occur
+	// below that threshold (e.g. when commands are set in multiple scopes).
+	// Keep a safe margin.
+	const maxTelegramCommands = 30
 	if len(tgCommands) > maxTelegramCommands {
-		slog.Info("telegram: trimming commands to limit", "total", len(tgCommands), "limit", maxTelegramCommands)
+		slog.Info("telegram: trimming commands", "total", len(tgCommands), "limit", maxTelegramCommands)
 		tgCommands = tgCommands[:maxTelegramCommands]
 	}
 
