@@ -418,7 +418,7 @@ func (p *Platform) handleMessageUpdate(msg *tgbotapi.Message, ff forumFields) {
 		ReplyCtx:  rctx,
 	}
 
-	slog.Debug("telegram: message received", "user", userName, "chat", msg.Chat.ID, "topic", ff.MessageThreadID)
+	slog.Info("telegram: dispatching message", "user", userName, "chat", msg.Chat.ID, "topic", ff.MessageThreadID, "text_len", len(text))
 	p.handler(p, coreMsg)
 }
 

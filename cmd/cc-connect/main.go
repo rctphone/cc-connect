@@ -34,6 +34,9 @@ func main() {
 	// Handle subcommands before flag parsing
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "version", "--version", "-v":
+			fmt.Printf("cc-connect %s\ncommit:  %s\nbuilt:   %s\n", version, commit, buildTime)
+			return
 		case "config-example":
 			fmt.Print(ccconnect.ConfigExampleTOML)
 			return
