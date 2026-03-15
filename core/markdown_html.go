@@ -485,7 +485,7 @@ func renderTableFlat(b *strings.Builder, rows [][]string, hasFormatting bool) {
 	headers := rows[0]
 	for i, row := range rows[1:] {
 		if i > 0 {
-			b.WriteByte('\n')
+			b.WriteString("\n\n")
 		}
 		// Use first cell as the bullet label.
 		label := ""
@@ -495,13 +495,12 @@ func renderTableFlat(b *strings.Builder, rows [][]string, hasFormatting bool) {
 		if label == "" {
 			label = headers[0]
 		}
-		b.WriteString("• <b>")
+		b.WriteString("• ")
 		if hasFormatting {
 			b.WriteString(convertInlineHTML(label))
 		} else {
 			b.WriteString(escapeHTML(label))
 		}
-		b.WriteString("</b>")
 		// Remaining cells as "  Header: value" lines.
 		for c := 1; c < len(headers) && c < len(row); c++ {
 			val := row[c]
