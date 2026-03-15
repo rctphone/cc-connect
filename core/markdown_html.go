@@ -342,6 +342,14 @@ func escapeHTML(s string) string {
 	return s
 }
 
+// stripMarkdownFormatting removes markdown inline formatting markers from s.
+func stripMarkdownFormatting(s string) string {
+	s = strings.ReplaceAll(s, "**", "")
+	s = strings.ReplaceAll(s, "~~", "")
+	s = strings.ReplaceAll(s, "`", "")
+	return s
+}
+
 // hasMarkdownFormatting reports whether s contains markdown inline formatting markers.
 func hasMarkdownFormatting(s string) bool {
 	return strings.Contains(s, "**") ||
@@ -495,13 +503,15 @@ func renderTableFlat(b *strings.Builder, rows [][]string, hasFormatting bool) {
 		if label == "" {
 			label = headers[0]
 		}
-		b.WriteString("• ")
+		b.WriteString("• <b>")
 		if hasFormatting {
 			b.WriteString(convertInlineHTML(label))
 		} else {
 			b.WriteString(escapeHTML(label))
 		}
+		b.WriteString("</b>")
 		// Remaining cells as "  Header: value" lines.
+		// Header names are always plain text (no bold even if markdown-formatted).
 		for c := 1; c < len(headers) && c < len(row); c++ {
 			val := row[c]
 			if val == "" {
@@ -509,13 +519,11 @@ func renderTableFlat(b *strings.Builder, rows [][]string, hasFormatting bool) {
 			}
 			b.WriteByte('\n')
 			b.WriteString("  ")
+			b.WriteString(escapeHTML(stripMarkdownFormatting(headers[c])))
+			b.WriteString(": ")
 			if hasFormatting {
-				b.WriteString(convertInlineHTML(headers[c]))
-				b.WriteString(": ")
 				b.WriteString(convertInlineHTML(val))
 			} else {
-				b.WriteString(escapeHTML(headers[c]))
-				b.WriteString(": ")
 				b.WriteString(escapeHTML(val))
 			}
 		}

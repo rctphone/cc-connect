@@ -470,13 +470,9 @@ func TestMarkdownToSimpleHTML_TableFlatten(t *testing.T) {
 	if !strings.Contains(out, "•") {
 		t.Errorf("expected bullet points in flattened table, got %q", out)
 	}
-	// Each data row becomes a bullet label (not bold).
-	if !strings.Contains(out, "• Цена (промо)") {
-		t.Errorf("expected bullet label for data row, got %q", out)
-	}
-	// Labels should NOT be bold.
-	if strings.Contains(out, "<b>Цена (промо)</b>") {
-		t.Errorf("labels should not be bold, got %q", out)
+	// Each data row becomes a bold bullet label.
+	if !strings.Contains(out, "• <b>Цена (промо)</b>") {
+		t.Errorf("expected bold bullet label for data row, got %q", out)
 	}
 	// Blank line between records.
 	if !strings.Contains(out, "\n\n•") {
