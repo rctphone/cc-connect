@@ -244,6 +244,23 @@ func (sm *SessionManager) GetSessionName(agentSessionID string) string {
 	return sm.sessionNames[agentSessionID]
 }
 
+// KnownAgentSessionIDs returns the set of agent session IDs associated with the
+// given sessionKey (user key). This is used to scope /list, /switch, /name,
+// /delete to only sessions created from that chat context.
+func (sm *SessionManager) KnownAgentSessionIDs(sessionKey string) map[string]bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	ids := make(map[string]bool)
+	for _, sid := range sm.userSessions[sessionKey] {
+		if s, ok := sm.sessions[sid]; ok {
+			if agentID := s.AgentSessionID; agentID != "" {
+				ids[agentID] = true
+			}
+		}
+	}
+	return ids
+}
+
 // AllSessions returns all sessions across all user keys.
 func (sm *SessionManager) AllSessions() []*Session {
 	sm.mu.RLock()

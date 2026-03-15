@@ -532,6 +532,25 @@ func (e *Engine) SetAdminFrom(adminFrom string) {
 	}
 }
 
+// groupChatAllowedCommands lists commands that may run in group/topic chats.
+// Commands NOT in this set are blocked in non-private chats to prevent
+// global mutations (model, mode, reasoning, provider, lang) from leaking
+// across projects. New commands default to private-only until added here.
+var groupChatAllowedCommands = map[string]bool{
+	// session-scoped — safe
+	"new": true, "list": true, "switch": true, "name": true, "delete": true,
+	"current": true, "status": true, "history": true, "stop": true,
+	"compress": true, "quiet": true, "search": true, "allow": true,
+	// read-only / admin-gated
+	"help": true, "version": true, "doctor": true, "usage": true,
+	"commands": true, "skills": true, "config": true,
+	"cron": true, "heartbeat": true, "tts": true,
+	"memory": true, // read allowed; add blocked inside cmdMemory
+	// admin commands (already gated by privilegedCommands)
+	"shell": true, "restart": true, "upgrade": true,
+	"bind": true, "workspace": true, "alias": true,
+}
+
 // privilegedCommands are commands that require admin_from authorization.
 var privilegedCommands = map[string]bool{
 	"shell":   true,
@@ -2715,6 +2734,11 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 		return true
 	}
 
+	if cmdID != "" && !groupChatAllowedCommands[cmdID] && !isPrivateChat(msg.SessionKey) {
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgPrivateChatOnly, cmdID))
+		return true
+	}
+
 	switch cmdID {
 	case "new":
 		e.cmdNew(p, msg, args)
@@ -2949,6 +2973,9 @@ func (e *Engine) cmdList(p Platform, msg *Message, args []string) {
 			e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgListError), err))
 			return
 		}
+		if !isPrivateChat(msg.SessionKey) {
+			agentSessions = e.filterSessionsByChat(agentSessions, sessions, msg.SessionKey)
+		}
 		if len(agentSessions) == 0 {
 			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgListEmpty))
 			return
@@ -3044,6 +3071,9 @@ func (e *Engine) cmdSwitch(p Platform, msg *Message, args []string) {
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, fmt.Sprintf("❌ %v", err))
 		return
+	}
+	if !isPrivateChat(msg.SessionKey) {
+		agentSessions = e.filterSessionsByChat(agentSessions, sessions, msg.SessionKey)
 	}
 
 	matched := e.matchSession(agentSessions, sessions, query)
@@ -3299,6 +3329,9 @@ func (e *Engine) cmdName(p Platform, msg *Message, args []string) {
 		if err != nil {
 			e.reply(p, msg.ReplyCtx, fmt.Sprintf("❌ %v", err))
 			return
+		}
+		if !isPrivateChat(msg.SessionKey) {
+			agentSessions = e.filterSessionsByChat(agentSessions, sessions, msg.SessionKey)
 		}
 		if idx > len(agentSessions) {
 			e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgSwitchNoSession), idx))
@@ -5604,6 +5637,9 @@ func (e *Engine) renderDeleteModeCard(sessionKey string) *Card {
 	if err != nil {
 		return e.simpleCard(e.i18n.T(MsgDeleteModeTitle), "red", err.Error())
 	}
+	if !isPrivateChat(sessionKey) {
+		agentSessions = e.filterSessionsByChat(agentSessions, sessions, sessionKey)
+	}
 	dm := e.getDeleteModeState(sessionKey)
 	if dm == nil {
 		return e.simpleCard(e.i18n.T(MsgDeleteModeTitle), "red", e.i18n.T(MsgDeleteUsage))
@@ -6000,6 +6036,9 @@ func (e *Engine) renderListCard(sessionKey string, page int) (*Card, error) {
 	agentSessions, err := agent.ListSessions(e.ctx)
 	if err != nil {
 		return nil, fmt.Errorf(e.i18n.T(MsgListError), err)
+	}
+	if !isPrivateChat(sessionKey) {
+		agentSessions = e.filterSessionsByChat(agentSessions, sessions, sessionKey)
 	}
 	if len(agentSessions) == 0 {
 		return e.simpleCard(e.i18n.Tf(MsgCardTitleSessions, agent.Name(), 0), "turquoise", e.i18n.T(MsgListEmpty)), nil
@@ -6407,6 +6446,9 @@ func (e *Engine) cmdMemory(p Platform, msg *Message, args []string) {
 	sub := matchSubCommand(strings.ToLower(args[0]), []string{"add", "global", "show", "help"})
 	switch sub {
 	case "add":
+		if !e.requirePrivateForMutation(p, msg, "memory add") {
+			return
+		}
 		text := strings.TrimSpace(strings.Join(args[1:], " "))
 		if text == "" {
 			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgMemoryAddUsage))
@@ -6421,6 +6463,9 @@ func (e *Engine) cmdMemory(p Platform, msg *Message, args []string) {
 			return
 		}
 		if strings.ToLower(args[1]) == "add" {
+			if !e.requirePrivateForMutation(p, msg, "memory global add") {
+				return
+			}
 			text := strings.TrimSpace(strings.Join(args[2:], " "))
 			if text == "" {
 				e.reply(p, msg.ReplyCtx, e.i18n.T(MsgMemoryAddUsage))
@@ -7588,7 +7633,7 @@ func (e *Engine) cmdAliasDel(p Platform, msg *Message, args []string) {
 }
 
 func (e *Engine) cmdDelete(p Platform, msg *Message, args []string) {
-	agent, _, _, err := e.commandContext(p, msg)
+	agent, sessions, _, err := e.commandContext(p, msg)
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgWsResolutionError, err))
 		return
@@ -7617,6 +7662,9 @@ func (e *Engine) cmdDelete(p Platform, msg *Message, args []string) {
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, fmt.Sprintf("❌ %v", err))
 		return
+	}
+	if !isPrivateChat(msg.SessionKey) {
+		agentSessions = e.filterSessionsByChat(agentSessions, sessions, msg.SessionKey)
 	}
 
 	prefix := strings.TrimSpace(args[0])
@@ -8379,9 +8427,66 @@ func extractChannelID(sessionKey string) string {
 	return ""
 }
 
+// isPrivateChat returns true if the session key represents a 1:1 private chat
+// (e.g. Telegram DM). In private chats, users see all sessions (admin view).
+// Group/supergroup/topic chats return false → sessions are scoped to that chat.
+func isPrivateChat(sessionKey string) bool {
+	parts := strings.SplitN(sessionKey, ":", 4)
+	if len(parts) < 2 {
+		return false
+	}
+	chatID, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return false // non-numeric channel (e.g. Feishu/Slack) — treat as group
+	}
+	return chatID > 0 && !strings.Contains(sessionKey, ":topic:")
+}
+
+// filterSessionsByChat filters agent sessions to only those known in the given
+// chat context. If the session manager has no local sessions for this key,
+// returns all sessions for backward compatibility.
+func (e *Engine) filterSessionsByChat(agentSessions []AgentSessionInfo, sm *SessionManager, sessionKey string) []AgentSessionInfo {
+	known := sm.KnownAgentSessionIDs(sessionKey)
+	if len(known) == 0 {
+		return agentSessions
+	}
+	filtered := make([]AgentSessionInfo, 0, len(known))
+	for _, s := range agentSessions {
+		if known[s.ID] {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered
+}
+
+// requirePrivateForMutation replies with an error and returns false if the
+// command is invoked from a group chat. Mutation commands that affect agent-global
+// state (/model, /mode, /reasoning, /provider, /lang) should only run in private chats.
+func (e *Engine) requirePrivateForMutation(p Platform, msg *Message, cmdName string) bool {
+	if isPrivateChat(msg.SessionKey) {
+		return true
+	}
+	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgPrivateChatOnly, cmdName))
+	return false
+}
+
 // commandContext resolves the appropriate agent, session manager, and interactive key
 // for a command. In multi-workspace mode, it routes to the bound workspace if present.
 func (e *Engine) commandContext(p Platform, msg *Message) (Agent, *SessionManager, string, error) {
+	// Topic-based workdir takes priority (e.g. Telegram forum topics with topic_workdirs).
+	if twr, ok := p.(TopicWorkDirResolver); ok {
+		if topicDir := twr.ResolveTopicWorkDir(msg.SessionKey); topicDir != "" {
+			if e.workspacePool == nil {
+				e.workspacePool = newWorkspacePool(15 * time.Minute)
+			}
+			wsAgent, wsSessions, err := e.getOrCreateWorkspaceAgent(topicDir)
+			if err != nil {
+				return nil, nil, "", err
+			}
+			return wsAgent, wsSessions, topicDir + ":" + msg.SessionKey, nil
+		}
+	}
+
 	if !e.multiWorkspace {
 		return e.agent, e.sessions, msg.SessionKey, nil
 	}
@@ -8404,8 +8509,22 @@ func (e *Engine) commandContext(p Platform, msg *Message) (Agent, *SessionManage
 }
 
 // sessionContextForKey resolves the agent and session manager for a sessionKey.
-// It uses existing workspace bindings and falls back to global context if unresolved.
+// It checks topic_workdir first, then workspace bindings, and falls back to global context.
 func (e *Engine) sessionContextForKey(sessionKey string) (Agent, *SessionManager) {
+	// Topic-based workdir takes priority.
+	for _, p := range e.platforms {
+		if twr, ok := p.(TopicWorkDirResolver); ok {
+			if topicDir := twr.ResolveTopicWorkDir(sessionKey); topicDir != "" {
+				if e.workspacePool == nil {
+					e.workspacePool = newWorkspacePool(15 * time.Minute)
+				}
+				if wsAgent, wsSessions, err := e.getOrCreateWorkspaceAgent(topicDir); err == nil {
+					return wsAgent, wsSessions
+				}
+			}
+		}
+	}
+
 	if !e.multiWorkspace || e.workspaceBindings == nil {
 		return e.agent, e.sessions
 	}

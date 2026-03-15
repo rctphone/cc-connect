@@ -1266,7 +1266,7 @@ func TestDeleteMode_ActiveSessionMarkedWithArrowAndNotSelectable(t *testing.T) {
 		{ID: "session-2", Summary: "Two"},
 	}}}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
-	msg := &Message{SessionKey: "feishu:user1", ReplyCtx: "ctx"}
+	msg := &Message{SessionKey: "feishu:123:123", ReplyCtx: "ctx"}
 	e.sessions.GetOrCreateActive(msg.SessionKey).SetAgentSessionID("session-1")
 
 	e.cmdDelete(p, msg, nil)
@@ -1351,7 +1351,7 @@ func TestCmdLang_UsesInlineButtonsOnButtonOnlyPlatform(t *testing.T) {
 	p := &stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "inline-only"}}
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
 
-	e.cmdLang(p, &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}, nil)
+	e.cmdLang(p, &Message{SessionKey: "test:123:123", ReplyCtx: "ctx"}, nil)
 
 	if len(p.buttonRows) == 0 {
 		t.Fatal("expected /lang to send inline buttons on button-only platform")
@@ -1365,7 +1365,7 @@ func TestCmdLang_UsesPlainTextChoicesOnPlatformWithoutCardsOrButtons(t *testing.
 	p := &stubPlatformEngine{n: "plain"}
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
 
-	e.cmdLang(p, &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}, nil)
+	e.cmdLang(p, &Message{SessionKey: "test:123:123", ReplyCtx: "ctx"}, nil)
 
 	if len(p.sent) != 1 {
 		t.Fatalf("sent messages = %d, want 1", len(p.sent))
@@ -1386,7 +1386,7 @@ func TestCmdProvider_UsesLegacyTextOnPlatformWithoutCardSupport(t *testing.T) {
 	}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
 
-	e.cmdProvider(p, &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}, nil)
+	e.cmdProvider(p, &Message{SessionKey: "test:123:123", ReplyCtx: "ctx"}, nil)
 
 	if len(p.sent) != 1 {
 		t.Fatalf("sent messages = %d, want 1", len(p.sent))
@@ -1407,7 +1407,7 @@ func TestCmdModel_UsesInlineButtonsOnButtonOnlyPlatform(t *testing.T) {
 	agent := &stubModelModeAgent{}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
 
-	e.cmdModel(p, &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}, nil)
+	e.cmdModel(p, &Message{SessionKey: "test:123:123", ReplyCtx: "ctx"}, nil)
 
 	if len(p.buttonRows) == 0 {
 		t.Fatal("expected /model to send inline buttons on button-only platform")
@@ -1422,7 +1422,7 @@ func TestCmdReasoning_UsesInlineButtonsOnButtonOnlyPlatform(t *testing.T) {
 	agent := &stubModelModeAgent{}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
 
-	e.cmdReasoning(p, &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}, nil)
+	e.cmdReasoning(p, &Message{SessionKey: "test:123:123", ReplyCtx: "ctx"}, nil)
 
 	if len(p.buttonRows) == 0 {
 		t.Fatal("expected /reasoning to send inline buttons on button-only platform")
@@ -1439,7 +1439,7 @@ func TestCmdReasoning_SwitchesEffortAndResetsSession(t *testing.T) {
 	p := &stubPlatformEngine{n: "plain"}
 	agent := &stubModelModeAgent{}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
-	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
+	msg := &Message{SessionKey: "test:123:123", ReplyCtx: "ctx"}
 
 	s := e.sessions.GetOrCreateActive(msg.SessionKey)
 	s.SetAgentSessionID("existing-session")
@@ -1465,7 +1465,7 @@ func TestCmdReasoning_RejectsMinimal(t *testing.T) {
 	p := &stubPlatformEngine{n: "plain"}
 	agent := &stubModelModeAgent{}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
-	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
+	msg := &Message{SessionKey: "test:123:123", ReplyCtx: "ctx"}
 
 	e.cmdReasoning(p, msg, []string{"minimal"})
 
@@ -1482,7 +1482,7 @@ func TestCmdMode_UsesInlineButtonsOnButtonOnlyPlatform(t *testing.T) {
 	agent := &stubModelModeAgent{}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
 
-	e.cmdMode(p, &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}, nil)
+	e.cmdMode(p, &Message{SessionKey: "test:123:123", ReplyCtx: "ctx"}, nil)
 
 	if len(p.buttonRows) == 0 {
 		t.Fatal("expected /mode to send inline buttons on button-only platform")
@@ -1769,9 +1769,9 @@ func TestRenderListCard_MakesEveryVisibleSessionClickable(t *testing.T) {
 	}
 
 	e := NewEngine("test", &stubListAgent{sessions: sessions}, []Platform{&stubPlatformEngine{n: "test"}}, "", LangEnglish)
-	e.sessions.GetOrCreateActive("test:user1").SetAgentSessionID(sessions[5].ID)
+	e.sessions.GetOrCreateActive("test:123:123").SetAgentSessionID(sessions[5].ID)
 
-	card, err := e.renderListCard("test:user1", 1)
+	card, err := e.renderListCard("test:123:123", 1)
 	if err != nil {
 		t.Fatalf("renderListCard returned error: %v", err)
 	}
@@ -3335,5 +3335,345 @@ func TestWriteQueuePin_EmptyDiscoversPinHandle(t *testing.T) {
 
 	if !p.unpinned {
 		t.Fatal("expected Unpin to be called via pin discovery")
+	}
+}
+
+// ── topic_workdir isolation test stub ──────────────────────────
+
+type stubTopicWorkDirPlatform struct {
+	stubPlatformEngine
+	workdirs map[string]string // sessionKey prefix → workdir
+}
+
+func (p *stubTopicWorkDirPlatform) ResolveTopicWorkDir(sessionKey string) string {
+	for prefix, dir := range p.workdirs {
+		if strings.HasPrefix(sessionKey, prefix) {
+			return dir
+		}
+	}
+	return ""
+}
+
+// ── command scoping tests ──────────────────────────────────────
+
+func TestIsPrivateChat(t *testing.T) {
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{"telegram:123:123", true},          // private DM
+		{"telegram:456:456", true},          // another private DM
+		{"telegram:-100123:456", false},     // group chat
+		{"telegram:-100123:topic:42:456", false}, // forum topic
+		{"telegram:-100123:topic:42", false},     // shared forum topic
+		{"telegram:-100123", false},              // shared group
+		{"feishu:abc:def", false},                // non-numeric channel
+		{"slack:C123:U1", false},                 // Slack channel (non-numeric)
+		{"test:123:123", true},                   // test private
+		{"test:user1", false},                    // non-numeric → group
+		{"", false},                              // empty
+		{"x", false},                             // too short
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			if got := isPrivateChat(tt.key); got != tt.want {
+				t.Fatalf("isPrivateChat(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFilterSessionsByChat(t *testing.T) {
+	e := newTestEngine()
+
+	// Create two sessions in "group" chat, each with an agent session ID
+	groupKey := "telegram:-100123:456"
+	s1 := e.sessions.NewSession(groupKey, "s1")
+	s1.SetAgentSessionID("agent-1")
+	s2 := e.sessions.NewSession(groupKey, "s2")
+	s2.SetAgentSessionID("agent-2")
+
+	allSessions := []AgentSessionInfo{
+		{ID: "agent-1", Summary: "One"},
+		{ID: "agent-2", Summary: "Two"},
+		{ID: "agent-3", Summary: "Three (from another chat)"},
+	}
+
+	filtered := e.filterSessionsByChat(allSessions, e.sessions, groupKey)
+	if len(filtered) != 2 {
+		t.Fatalf("filtered len = %d, want 2", len(filtered))
+	}
+	if filtered[0].ID != "agent-1" || filtered[1].ID != "agent-2" {
+		t.Fatalf("filtered IDs = [%s, %s], want [agent-1, agent-2]", filtered[0].ID, filtered[1].ID)
+	}
+}
+
+func TestFilterSessionsByChat_EmptyKnown_ReturnsAll(t *testing.T) {
+	e := newTestEngine()
+
+	allSessions := []AgentSessionInfo{
+		{ID: "agent-1", Summary: "One"},
+		{ID: "agent-2", Summary: "Two"},
+	}
+
+	// No local sessions for this key → backward compat, return all
+	filtered := e.filterSessionsByChat(allSessions, e.sessions, "telegram:-100123:789")
+	if len(filtered) != 2 {
+		t.Fatalf("filtered len = %d, want 2 (backward compat)", len(filtered))
+	}
+}
+
+func TestCmdList_GroupChatFiltersSessionsByChat(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	agent := &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "agent-1", Summary: "Chat1 Session", MessageCount: 1, ModifiedAt: time.Now()},
+		{ID: "agent-2", Summary: "Chat2 Session", MessageCount: 1, ModifiedAt: time.Now()},
+		{ID: "agent-3", Summary: "Other Session", MessageCount: 1, ModifiedAt: time.Now()},
+	}}
+	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+
+	// Simulate group chat with only agent-1 known
+	groupKey := "telegram:-100123:456"
+	s := e.sessions.NewSession(groupKey, "s1")
+	s.SetAgentSessionID("agent-1")
+
+	msg := &Message{SessionKey: groupKey, ReplyCtx: "ctx"}
+	e.cmdList(p, msg, nil)
+
+	if len(p.sent) == 0 {
+		t.Fatal("expected /list to send a response")
+	}
+	if !strings.Contains(p.sent[0], "Chat1 Session") {
+		t.Fatalf("expected own session in list, got: %q", p.sent[0])
+	}
+	if strings.Contains(p.sent[0], "Other Session") {
+		t.Fatalf("expected other session to be filtered out, got: %q", p.sent[0])
+	}
+}
+
+func TestCmdList_PrivateChatShowsAllSessions(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	agent := &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "agent-1", Summary: "Session One", MessageCount: 1, ModifiedAt: time.Now()},
+		{ID: "agent-2", Summary: "Session Two", MessageCount: 1, ModifiedAt: time.Now()},
+	}}
+	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+
+	privateKey := "telegram:123:123"
+	msg := &Message{SessionKey: privateKey, ReplyCtx: "ctx"}
+	e.cmdList(p, msg, nil)
+
+	if len(p.sent) == 0 {
+		t.Fatal("expected /list to send a response")
+	}
+	if !strings.Contains(p.sent[0], "Session One") || !strings.Contains(p.sent[0], "Session Two") {
+		t.Fatalf("expected all sessions in private chat, got: %q", p.sent[0])
+	}
+}
+
+func TestGroupChatBlocksMutationCommands(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+
+	groupKey := "telegram:-100123:456"
+
+	blockedCmds := []string{"/model", "/mode", "/reasoning", "/provider", "/lang"}
+	for _, cmd := range blockedCmds {
+		p.sent = nil
+		msg := &Message{SessionKey: groupKey, ReplyCtx: "ctx"}
+		e.handleCommand(p, msg, cmd)
+
+		if len(p.sent) == 0 {
+			t.Fatalf("%s: expected blocked message in group chat", cmd)
+		}
+		if !strings.Contains(p.sent[0], "private chat") {
+			t.Fatalf("%s: expected private-chat-only message, got: %q", cmd, p.sent[0])
+		}
+	}
+}
+
+func TestGroupChatAllowsSafeCommands(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+
+	groupKey := "telegram:-100123:456"
+
+	// These should NOT produce "private chat" error
+	safeCmds := []string{"/help", "/version", "/status", "/current"}
+	for _, cmd := range safeCmds {
+		p.sent = nil
+		msg := &Message{SessionKey: groupKey, ReplyCtx: "ctx"}
+		e.handleCommand(p, msg, cmd)
+
+		for _, s := range p.sent {
+			if strings.Contains(s, "private chat") {
+				t.Fatalf("%s: should be allowed in group chat, got: %q", cmd, s)
+			}
+		}
+	}
+}
+
+func TestPrivateChatAllowsAllCommands(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+
+	privateKey := "telegram:123:123"
+
+	cmds := []string{"/model", "/mode", "/lang", "/help", "/version"}
+	for _, cmd := range cmds {
+		p.sent = nil
+		msg := &Message{SessionKey: privateKey, ReplyCtx: "ctx"}
+		e.handleCommand(p, msg, cmd)
+
+		for _, s := range p.sent {
+			if strings.Contains(s, "private chat") {
+				t.Fatalf("%s: should be allowed in private chat, got: %q", cmd, s)
+			}
+		}
+	}
+}
+
+func TestTopicWorkDir_TwoChatsGetIsolatedWorkspaces(t *testing.T) {
+	// Two forum topics, each with a different work_dir.
+	// Verify /list in each chat shows only that workspace's sessions.
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	p := &stubTopicWorkDirPlatform{
+		stubPlatformEngine: stubPlatformEngine{n: "telegram"},
+		workdirs: map[string]string{
+			"telegram:-100123:topic:10": dir1,
+			"telegram:-100123:topic:20": dir2,
+		},
+	}
+
+	globalAgent := &stubListAgent{
+		sessions: []AgentSessionInfo{
+			{ID: "global-1", Summary: "Global Session", MessageCount: 1, ModifiedAt: time.Now()},
+		},
+	}
+	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
+	// Initialize workspace pool (normally done by HandleMessage)
+	e.workspacePool = newWorkspacePool(15 * time.Minute)
+
+	// Pre-populate workspace 1 with its own agent + sessions
+	ws1 := e.workspacePool.GetOrCreate(dir1)
+	ws1.agent = &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "ws1-a", Summary: "Delumo Landing", MessageCount: 3, ModifiedAt: time.Now()},
+	}}
+	ws1.sessions = NewSessionManager("")
+
+	// Pre-populate workspace 2 with different sessions
+	ws2 := e.workspacePool.GetOrCreate(dir2)
+	ws2.agent = &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "ws2-a", Summary: "Raissa Personal", MessageCount: 5, ModifiedAt: time.Now()},
+	}}
+	ws2.sessions = NewSessionManager("")
+
+	// /list in topic 10 → should see only "Delumo Landing", not "Raissa Personal" or "Global Session"
+	msg1 := &Message{SessionKey: "telegram:-100123:topic:10:456", ReplyCtx: "ctx"}
+	p.sent = nil
+	e.cmdList(p, msg1, nil)
+
+	if len(p.sent) == 0 {
+		t.Fatal("expected /list in topic 10 to produce output")
+	}
+	if !strings.Contains(p.sent[0], "Delumo Landing") {
+		t.Fatalf("topic 10: expected 'Delumo Landing', got: %q", p.sent[0])
+	}
+	if strings.Contains(p.sent[0], "Raissa Personal") {
+		t.Fatalf("topic 10: should NOT see 'Raissa Personal', got: %q", p.sent[0])
+	}
+	if strings.Contains(p.sent[0], "Global Session") {
+		t.Fatalf("topic 10: should NOT see 'Global Session', got: %q", p.sent[0])
+	}
+
+	// /list in topic 20 → should see only "Raissa Personal"
+	msg2 := &Message{SessionKey: "telegram:-100123:topic:20:456", ReplyCtx: "ctx"}
+	p.sent = nil
+	e.cmdList(p, msg2, nil)
+
+	if len(p.sent) == 0 {
+		t.Fatal("expected /list in topic 20 to produce output")
+	}
+	if !strings.Contains(p.sent[0], "Raissa Personal") {
+		t.Fatalf("topic 20: expected 'Raissa Personal', got: %q", p.sent[0])
+	}
+	if strings.Contains(p.sent[0], "Delumo Landing") {
+		t.Fatalf("topic 20: should NOT see 'Delumo Landing', got: %q", p.sent[0])
+	}
+}
+
+func TestTopicWorkDir_CommandContextResolvesCorrectWorkspace(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	p := &stubTopicWorkDirPlatform{
+		stubPlatformEngine: stubPlatformEngine{n: "telegram"},
+		workdirs: map[string]string{
+			"telegram:-100123:topic:10": dir1,
+			"telegram:-100123:topic:20": dir2,
+		},
+	}
+
+	globalAgent := &stubAgent{}
+	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
+	e.workspacePool = newWorkspacePool(15 * time.Minute)
+
+	// Pre-populate workspaces
+	ws1 := e.workspacePool.GetOrCreate(dir1)
+	ws1.agent = &stubListAgent{sessions: []AgentSessionInfo{{ID: "ws1-a", Summary: "WS1"}}}
+	ws1.sessions = NewSessionManager("")
+
+	ws2 := e.workspacePool.GetOrCreate(dir2)
+	ws2.agent = &stubListAgent{sessions: []AgentSessionInfo{{ID: "ws2-a", Summary: "WS2"}}}
+	ws2.sessions = NewSessionManager("")
+
+	// commandContext for topic 10 → should get ws1's agent
+	msg1 := &Message{SessionKey: "telegram:-100123:topic:10:456", ReplyCtx: "ctx"}
+	agent1, sessions1, key1, err := e.commandContext(p, msg1)
+	if err != nil {
+		t.Fatalf("commandContext topic 10: %v", err)
+	}
+	if agent1 == globalAgent {
+		t.Fatal("topic 10: commandContext returned global agent, expected workspace agent")
+	}
+	if sessions1 == e.sessions {
+		t.Fatal("topic 10: commandContext returned global sessions, expected workspace sessions")
+	}
+	if !strings.Contains(key1, dir1) {
+		t.Fatalf("topic 10: interactiveKey = %q, expected to contain %q", key1, dir1)
+	}
+
+	// commandContext for topic 20 → should get ws2's agent (different from ws1)
+	msg2 := &Message{SessionKey: "telegram:-100123:topic:20:456", ReplyCtx: "ctx"}
+	agent2, sessions2, key2, err := e.commandContext(p, msg2)
+	if err != nil {
+		t.Fatalf("commandContext topic 20: %v", err)
+	}
+	if agent2 == globalAgent {
+		t.Fatal("topic 20: commandContext returned global agent, expected workspace agent")
+	}
+	if agent2 == agent1 {
+		t.Fatal("topic 20: got same agent as topic 10, expected different workspace")
+	}
+	if sessions2 == sessions1 {
+		t.Fatal("topic 20: got same sessions as topic 10")
+	}
+	if !strings.Contains(key2, dir2) {
+		t.Fatalf("topic 20: interactiveKey = %q, expected to contain %q", key2, dir2)
+	}
+
+	// Message without topic → should get global agent
+	msg3 := &Message{SessionKey: "telegram:123:123", ReplyCtx: "ctx"}
+	agent3, sessions3, _, err := e.commandContext(p, msg3)
+	if err != nil {
+		t.Fatalf("commandContext private: %v", err)
+	}
+	if agent3 != globalAgent {
+		t.Fatal("private chat: expected global agent")
+	}
+	if sessions3 != e.sessions {
+		t.Fatal("private chat: expected global sessions")
 	}
 }

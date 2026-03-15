@@ -404,6 +404,7 @@ const (
 	MsgBannedWordBlocked MsgKey = "banned_word_blocked"
 	MsgCommandDisabled   MsgKey = "command_disabled"
 	MsgAdminRequired     MsgKey = "admin_required"
+	MsgPrivateChatOnly   MsgKey = "private_chat_only"
 	MsgRateLimited       MsgKey = "rate_limited"
 
 	MsgRelayNoBinding     MsgKey = "relay_no_binding"
@@ -2935,6 +2936,14 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese:           "🔒 コマンド `%s` には管理者権限が必要です。設定で `admin_from` を設定してユーザーを承認してください。",
 		LangSpanish:            "🔒 El comando `%s` requiere privilegios de administrador. Configure `admin_from` en la configuración.",
 		LangRussian:            "🔒 Команда `%s` требует прав администратора. Настройте `admin_from` в конфигурации.",
+	},
+	MsgPrivateChatOnly: {
+		LangEnglish:            "🔒 `/%s` is only available in private chat with the bot.",
+		LangChinese:            "🔒 `/%s` 仅在与机器人的私聊中可用。",
+		LangTraditionalChinese: "🔒 `/%s` 僅在與機器人的私聊中可用。",
+		LangJapanese:           "🔒 `/%s` はボットとのプライベートチャットでのみ使用できます。",
+		LangSpanish:            "🔒 `/%s` solo está disponible en chat privado con el bot.",
+		LangRussian:            "🔒 `/%s` доступна только в личном чате с ботом.",
 	},
 	MsgRateLimited: {
 		LangEnglish:            "⏳ You are sending messages too fast. Please wait a moment.",
