@@ -3338,22 +3338,6 @@ func TestWriteQueuePin_EmptyDiscoversPinHandle(t *testing.T) {
 	}
 }
 
-// ── topic_workdir isolation test stub ──────────────────────────
-
-type stubTopicWorkDirPlatform struct {
-	stubPlatformEngine
-	workdirs map[string]string // sessionKey prefix → workdir
-}
-
-func (p *stubTopicWorkDirPlatform) ResolveTopicWorkDir(sessionKey string) string {
-	for prefix, dir := range p.workdirs {
-		if strings.HasPrefix(sessionKey, prefix) {
-			return dir
-		}
-	}
-	return ""
-}
-
 // ── command scoping tests ──────────────────────────────────────
 
 func TestIsPrivateChat(t *testing.T) {
@@ -3533,227 +3517,6 @@ func TestPrivateChatAllowsAllCommands(t *testing.T) {
 	}
 }
 
-func TestTopicWorkDir_TwoChatsGetIsolatedWorkspaces(t *testing.T) {
-	// Two forum topics, each with a different work_dir.
-	// Verify /list in each chat shows only that workspace's sessions.
-	dir1 := t.TempDir()
-	dir2 := t.TempDir()
-
-	p := &stubTopicWorkDirPlatform{
-		stubPlatformEngine: stubPlatformEngine{n: "telegram"},
-		workdirs: map[string]string{
-			"telegram:-100123:topic:10": dir1,
-			"telegram:-100123:topic:20": dir2,
-		},
-	}
-
-	globalAgent := &stubListAgent{
-		sessions: []AgentSessionInfo{
-			{ID: "global-1", Summary: "Global Session", MessageCount: 1, ModifiedAt: time.Now()},
-		},
-	}
-	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
-	// Initialize workspace pool (normally done by HandleMessage)
-	e.workspacePool = newWorkspacePool(15 * time.Minute)
-
-	// Pre-populate workspace 1 with its own agent + sessions
-	ws1 := e.workspacePool.GetOrCreate(dir1)
-	ws1.agent = &stubListAgent{sessions: []AgentSessionInfo{
-		{ID: "ws1-a", Summary: "Delumo Landing", MessageCount: 3, ModifiedAt: time.Now()},
-	}}
-	ws1.sessions = NewSessionManager("")
-
-	// Pre-populate workspace 2 with different sessions
-	ws2 := e.workspacePool.GetOrCreate(dir2)
-	ws2.agent = &stubListAgent{sessions: []AgentSessionInfo{
-		{ID: "ws2-a", Summary: "Raissa Personal", MessageCount: 5, ModifiedAt: time.Now()},
-	}}
-	ws2.sessions = NewSessionManager("")
-
-	// /list in topic 10 → should see only "Delumo Landing", not "Raissa Personal" or "Global Session"
-	msg1 := &Message{SessionKey: "telegram:-100123:topic:10:456", ReplyCtx: "ctx"}
-	p.sent = nil
-	e.cmdList(p, msg1, nil)
-
-	if len(p.sent) == 0 {
-		t.Fatal("expected /list in topic 10 to produce output")
-	}
-	if !strings.Contains(p.sent[0], "Delumo Landing") {
-		t.Fatalf("topic 10: expected 'Delumo Landing', got: %q", p.sent[0])
-	}
-	if strings.Contains(p.sent[0], "Raissa Personal") {
-		t.Fatalf("topic 10: should NOT see 'Raissa Personal', got: %q", p.sent[0])
-	}
-	if strings.Contains(p.sent[0], "Global Session") {
-		t.Fatalf("topic 10: should NOT see 'Global Session', got: %q", p.sent[0])
-	}
-
-	// /list in topic 20 → should see only "Raissa Personal"
-	msg2 := &Message{SessionKey: "telegram:-100123:topic:20:456", ReplyCtx: "ctx"}
-	p.sent = nil
-	e.cmdList(p, msg2, nil)
-
-	if len(p.sent) == 0 {
-		t.Fatal("expected /list in topic 20 to produce output")
-	}
-	if !strings.Contains(p.sent[0], "Raissa Personal") {
-		t.Fatalf("topic 20: expected 'Raissa Personal', got: %q", p.sent[0])
-	}
-	if strings.Contains(p.sent[0], "Delumo Landing") {
-		t.Fatalf("topic 20: should NOT see 'Delumo Landing', got: %q", p.sent[0])
-	}
-}
-
-func TestTopicWorkDir_CommandContextResolvesCorrectWorkspace(t *testing.T) {
-	dir1 := t.TempDir()
-	dir2 := t.TempDir()
-
-	p := &stubTopicWorkDirPlatform{
-		stubPlatformEngine: stubPlatformEngine{n: "telegram"},
-		workdirs: map[string]string{
-			"telegram:-100123:topic:10": dir1,
-			"telegram:-100123:topic:20": dir2,
-		},
-	}
-
-	globalAgent := &stubAgent{}
-	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
-	e.workspacePool = newWorkspacePool(15 * time.Minute)
-
-	// Pre-populate workspaces
-	ws1 := e.workspacePool.GetOrCreate(dir1)
-	ws1.agent = &stubListAgent{sessions: []AgentSessionInfo{{ID: "ws1-a", Summary: "WS1"}}}
-	ws1.sessions = NewSessionManager("")
-
-	ws2 := e.workspacePool.GetOrCreate(dir2)
-	ws2.agent = &stubListAgent{sessions: []AgentSessionInfo{{ID: "ws2-a", Summary: "WS2"}}}
-	ws2.sessions = NewSessionManager("")
-
-	// commandContext for topic 10 → should get ws1's agent
-	msg1 := &Message{SessionKey: "telegram:-100123:topic:10:456", ReplyCtx: "ctx"}
-	agent1, sessions1, key1, err := e.commandContext(p, msg1)
-	if err != nil {
-		t.Fatalf("commandContext topic 10: %v", err)
-	}
-	if agent1 == globalAgent {
-		t.Fatal("topic 10: commandContext returned global agent, expected workspace agent")
-	}
-	if sessions1 == e.sessions {
-		t.Fatal("topic 10: commandContext returned global sessions, expected workspace sessions")
-	}
-	if !strings.Contains(key1, dir1) {
-		t.Fatalf("topic 10: interactiveKey = %q, expected to contain %q", key1, dir1)
-	}
-
-	// commandContext for topic 20 → should get ws2's agent (different from ws1)
-	msg2 := &Message{SessionKey: "telegram:-100123:topic:20:456", ReplyCtx: "ctx"}
-	agent2, sessions2, key2, err := e.commandContext(p, msg2)
-	if err != nil {
-		t.Fatalf("commandContext topic 20: %v", err)
-	}
-	if agent2 == globalAgent {
-		t.Fatal("topic 20: commandContext returned global agent, expected workspace agent")
-	}
-	if agent2 == agent1 {
-		t.Fatal("topic 20: got same agent as topic 10, expected different workspace")
-	}
-	if sessions2 == sessions1 {
-		t.Fatal("topic 20: got same sessions as topic 10")
-	}
-	if !strings.Contains(key2, dir2) {
-		t.Fatalf("topic 20: interactiveKey = %q, expected to contain %q", key2, dir2)
-	}
-
-	// Message without topic → should get global agent
-	msg3 := &Message{SessionKey: "telegram:123:123", ReplyCtx: "ctx"}
-	agent3, sessions3, _, err := e.commandContext(p, msg3)
-	if err != nil {
-		t.Fatalf("commandContext private: %v", err)
-	}
-	if agent3 != globalAgent {
-		t.Fatal("private chat: expected global agent")
-	}
-	if sessions3 != e.sessions {
-		t.Fatal("private chat: expected global sessions")
-	}
-}
-
-func TestTopicWorkDir_TwoDifferentChatsIsolated(t *testing.T) {
-	// Two different group chats (not topics), each with their own work_dir.
-	// Simulates: chat "delumo" → landing project, chat "raissa" → main project.
-	dirDelumo := t.TempDir()
-	dirRaissa := t.TempDir()
-
-	p := &stubTopicWorkDirPlatform{
-		stubPlatformEngine: stubPlatformEngine{n: "telegram"},
-		workdirs: map[string]string{
-			"telegram:-200001": dirDelumo, // chat delumo (no topic → topicID=0)
-			"telegram:-200002": dirRaissa, // chat raissa
-		},
-	}
-
-	globalAgent := &stubListAgent{
-		sessions: []AgentSessionInfo{
-			{ID: "global-1", Summary: "Global", MessageCount: 1, ModifiedAt: time.Now()},
-		},
-	}
-	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
-	e.workspacePool = newWorkspacePool(15 * time.Minute)
-
-	// Workspace for delumo
-	wsDelumo := e.workspacePool.GetOrCreate(dirDelumo)
-	wsDelumo.agent = &stubListAgent{sessions: []AgentSessionInfo{
-		{ID: "delumo-1", Summary: "Delumo Landing Page", MessageCount: 2, ModifiedAt: time.Now()},
-	}}
-	wsDelumo.sessions = NewSessionManager("")
-
-	// Workspace for raissa
-	wsRaissa := e.workspacePool.GetOrCreate(dirRaissa)
-	wsRaissa.agent = &stubListAgent{sessions: []AgentSessionInfo{
-		{ID: "raissa-1", Summary: "Raissa Main Project", MessageCount: 5, ModifiedAt: time.Now()},
-	}}
-	wsRaissa.sessions = NewSessionManager("")
-
-	// /list in delumo chat → only delumo sessions
-	p.sent = nil
-	e.cmdList(p, &Message{SessionKey: "telegram:-200001:456", ReplyCtx: "ctx"}, nil)
-	if len(p.sent) == 0 {
-		t.Fatal("delumo chat: expected /list output")
-	}
-	if !strings.Contains(p.sent[0], "Delumo Landing Page") {
-		t.Fatalf("delumo chat: expected own session, got: %q", p.sent[0])
-	}
-	if strings.Contains(p.sent[0], "Raissa Main Project") {
-		t.Fatalf("delumo chat: should NOT see raissa session, got: %q", p.sent[0])
-	}
-	if strings.Contains(p.sent[0], "Global") {
-		t.Fatalf("delumo chat: should NOT see global session, got: %q", p.sent[0])
-	}
-
-	// /list in raissa chat → only raissa sessions
-	p.sent = nil
-	e.cmdList(p, &Message{SessionKey: "telegram:-200002:456", ReplyCtx: "ctx"}, nil)
-	if len(p.sent) == 0 {
-		t.Fatal("raissa chat: expected /list output")
-	}
-	if !strings.Contains(p.sent[0], "Raissa Main Project") {
-		t.Fatalf("raissa chat: expected own session, got: %q", p.sent[0])
-	}
-	if strings.Contains(p.sent[0], "Delumo Landing Page") {
-		t.Fatalf("raissa chat: should NOT see delumo session, got: %q", p.sent[0])
-	}
-
-	// Verify commandContext returns different agents
-	agent1, _, _, _ := e.commandContext(p, &Message{SessionKey: "telegram:-200001:456"})
-	agent2, _, _, _ := e.commandContext(p, &Message{SessionKey: "telegram:-200002:456"})
-	if agent1 == agent2 {
-		t.Fatal("two different chats got same agent — should be isolated")
-	}
-	if agent1 == globalAgent || agent2 == globalAgent {
-		t.Fatal("chat agents should not be the global agent")
-	}
-}
-
 // ── config workspace tests ─────────────────────────────────────
 
 func TestExtractChannelKey(t *testing.T) {
@@ -3887,38 +3650,173 @@ func TestConfigWorkspaces_TopicAndChat(t *testing.T) {
 	}
 }
 
-func TestConfigWorkspaces_TakesPriorityOverTopicWorkDirs(t *testing.T) {
-	dirConfig := t.TempDir()
-	dirTopic := t.TempDir()
+func TestConfigWorkspaces_SwitchCannotReachOtherWorkspace(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
 
-	// Platform with topic_workdirs
-	p := &stubTopicWorkDirPlatform{
-		stubPlatformEngine: stubPlatformEngine{n: "telegram"},
-		workdirs: map[string]string{
-			"telegram:-100123:topic:42": dirTopic,
-		},
-	}
-
+	p := &stubPlatformEngine{n: "telegram"}
 	globalAgent := &stubAgent{}
 	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
 
-	// Config workspace for the same topic → should win
 	e.SetConfigWorkspaces([]ConfigWorkspace{
-		{ChannelKey: "-100123:topic:42", WorkDir: dirConfig, Name: "from-config"},
+		{ChannelKey: "-200001", WorkDir: dir1, Name: "project-a"},
+		{ChannelKey: "-200002", WorkDir: dir2, Name: "project-b"},
 	})
 
-	ws := e.workspacePool.GetOrCreate(dirConfig)
-	ws.agent = &stubListAgent{}
-	ws.sessions = NewSessionManager("")
+	// Workspace A has sessions a1, a2
+	wsA := e.workspacePool.GetOrCreate(dir1)
+	wsA.agent = &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "a1", Summary: "Session A1", MessageCount: 1, ModifiedAt: time.Now()},
+		{ID: "a2", Summary: "Session A2", MessageCount: 1, ModifiedAt: time.Now()},
+	}}
+	wsA.sessions = NewSessionManager("")
 
-	agent, _, _, _ := e.commandContext(p, &Message{SessionKey: "telegram:-100123:topic:42:456"})
-	if agent == globalAgent {
-		t.Fatal("expected config workspace agent, got global")
+	// Workspace B has sessions b1
+	wsB := e.workspacePool.GetOrCreate(dir2)
+	wsB.agent = &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "b1", Summary: "Session B1", MessageCount: 1, ModifiedAt: time.Now()},
+	}}
+	wsB.sessions = NewSessionManager("")
+
+	// In chat A: /switch 1 → switches to a1 (OK)
+	p.sent = nil
+	msgA := &Message{SessionKey: "telegram:-200001:456", ReplyCtx: "ctx"}
+	e.cmdSwitch(p, msgA, []string{"1"})
+	if len(p.sent) == 0 {
+		t.Fatal("expected /switch response in chat A")
+	}
+	if !strings.Contains(p.sent[0], "Session A1") {
+		t.Fatalf("chat A: /switch 1 should get A1, got: %q", p.sent[0])
 	}
 
-	// Verify it's the config workspace, not the topic_workdir one
-	resolved := e.resolveConfigWorkspace("telegram:-100123:topic:42:456")
-	if resolved != dirConfig {
-		t.Fatalf("resolveConfigWorkspace = %q, want %q", resolved, dirConfig)
+	// In chat B: only 1 session (b1), so /switch 2 should fail
+	p.sent = nil
+	msgB := &Message{SessionKey: "telegram:-200002:456", ReplyCtx: "ctx"}
+	e.cmdSwitch(p, msgB, []string{"2"})
+	if len(p.sent) == 0 {
+		t.Fatal("expected /switch response in chat B")
+	}
+	// Should report no match — can't see chat A's sessions
+	if strings.Contains(p.sent[0], "Session A") {
+		t.Fatalf("chat B: /switch 2 leaked chat A sessions: %q", p.sent[0])
 	}
 }
+
+func TestConfigWorkspaces_ListShowsOnlyOwnSessions(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	p := &stubPlatformEngine{n: "telegram"}
+	globalAgent := &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "g1", Summary: "Global One", MessageCount: 1, ModifiedAt: time.Now()},
+		{ID: "g2", Summary: "Global Two", MessageCount: 1, ModifiedAt: time.Now()},
+	}}
+	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
+
+	e.SetConfigWorkspaces([]ConfigWorkspace{
+		{ChannelKey: "-300001", WorkDir: dir1, Name: "alpha"},
+		{ChannelKey: "-300002", WorkDir: dir2, Name: "beta"},
+	})
+
+	wsAlpha := e.workspacePool.GetOrCreate(dir1)
+	wsAlpha.agent = &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "alpha-1", Summary: "Alpha Session", MessageCount: 3, ModifiedAt: time.Now()},
+	}}
+	wsAlpha.sessions = NewSessionManager("")
+
+	wsBeta := e.workspacePool.GetOrCreate(dir2)
+	wsBeta.agent = &stubListAgent{sessions: []AgentSessionInfo{
+		{ID: "beta-1", Summary: "Beta Session", MessageCount: 7, ModifiedAt: time.Now()},
+		{ID: "beta-2", Summary: "Beta Other", MessageCount: 2, ModifiedAt: time.Now()},
+	}}
+	wsBeta.sessions = NewSessionManager("")
+
+	// /list in alpha → only alpha
+	p.sent = nil
+	e.cmdList(p, &Message{SessionKey: "telegram:-300001:456", ReplyCtx: "ctx"}, nil)
+	if !strings.Contains(p.sent[0], "Alpha Session") {
+		t.Fatalf("alpha: expected own session, got: %q", p.sent[0])
+	}
+	if strings.Contains(p.sent[0], "Beta") || strings.Contains(p.sent[0], "Global") {
+		t.Fatalf("alpha: session leak: %q", p.sent[0])
+	}
+
+	// /list in beta → only beta (2 sessions)
+	p.sent = nil
+	e.cmdList(p, &Message{SessionKey: "telegram:-300002:456", ReplyCtx: "ctx"}, nil)
+	if !strings.Contains(p.sent[0], "Beta Session") || !strings.Contains(p.sent[0], "Beta Other") {
+		t.Fatalf("beta: expected both beta sessions, got: %q", p.sent[0])
+	}
+	if strings.Contains(p.sent[0], "Alpha") || strings.Contains(p.sent[0], "Global") {
+		t.Fatalf("beta: session leak: %q", p.sent[0])
+	}
+
+	// /list in private chat → global sessions only
+	p.sent = nil
+	e.cmdList(p, &Message{SessionKey: "telegram:123:123", ReplyCtx: "ctx"}, nil)
+	if !strings.Contains(p.sent[0], "Global One") || !strings.Contains(p.sent[0], "Global Two") {
+		t.Fatalf("private: expected global sessions, got: %q", p.sent[0])
+	}
+	if strings.Contains(p.sent[0], "Alpha") || strings.Contains(p.sent[0], "Beta") {
+		t.Fatalf("private: workspace session leak: %q", p.sent[0])
+	}
+}
+
+func TestConfigWorkspaces_EachGetsOwnSessionManager(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	p := &stubPlatformEngine{n: "telegram"}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+
+	e.SetConfigWorkspaces([]ConfigWorkspace{
+		{ChannelKey: "-400001", WorkDir: dir1},
+		{ChannelKey: "-400002", WorkDir: dir2},
+	})
+
+	wsA := e.workspacePool.GetOrCreate(dir1)
+	wsA.agent = &stubAgent{}
+	wsA.sessions = NewSessionManager("")
+
+	wsB := e.workspacePool.GetOrCreate(dir2)
+	wsB.agent = &stubAgent{}
+	wsB.sessions = NewSessionManager("")
+
+	// Create session in workspace A
+	msgA := &Message{SessionKey: "telegram:-400001:456", ReplyCtx: "ctx"}
+	_, sessionsA, _, _ := e.commandContext(p, msgA)
+	sA := sessionsA.GetOrCreateActive(msgA.SessionKey)
+	sA.SetAgentSessionID("agent-ws-a")
+
+	// Create session in workspace B
+	msgB := &Message{SessionKey: "telegram:-400002:456", ReplyCtx: "ctx"}
+	_, sessionsB, _, _ := e.commandContext(p, msgB)
+	sB := sessionsB.GetOrCreateActive(msgB.SessionKey)
+	sB.SetAgentSessionID("agent-ws-b")
+
+	// Session managers are different
+	if sessionsA == sessionsB {
+		t.Fatal("workspaces should have different session managers")
+	}
+	if sessionsA == e.sessions || sessionsB == e.sessions {
+		t.Fatal("workspace sessions should differ from global")
+	}
+
+	// Each session manager knows only its own agent session
+	knownA := sessionsA.KnownAgentSessionIDs(msgA.SessionKey)
+	if !knownA["agent-ws-a"] {
+		t.Fatal("workspace A sessions should know agent-ws-a")
+	}
+	if knownA["agent-ws-b"] {
+		t.Fatal("workspace A sessions should NOT know agent-ws-b")
+	}
+
+	knownB := sessionsB.KnownAgentSessionIDs(msgB.SessionKey)
+	if !knownB["agent-ws-b"] {
+		t.Fatal("workspace B sessions should know agent-ws-b")
+	}
+	if knownB["agent-ws-a"] {
+		t.Fatal("workspace B sessions should NOT know agent-ws-a")
+	}
+}
+

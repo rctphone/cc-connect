@@ -324,13 +324,6 @@ type ChannelNameResolver interface {
 	ResolveChannelName(channelID string) (string, error)
 }
 
-// TopicWorkDirResolver is an optional interface for platforms that support
-// mapping chat+topic combinations to specific working directories.
-// The engine checks this before multi-workspace resolution.
-type TopicWorkDirResolver interface {
-	ResolveTopicWorkDir(sessionKey string) string
-}
-
 // CompactToolTracker is an optional interface for platforms that support
 // sending trackable messages that can be deleted later. Used by compact tool
 // display to clean up tool progress messages after a successful result.

@@ -130,64 +130,6 @@ func TestSessionKeyForChat(t *testing.T) {
 	}
 }
 
-func TestParseSessionKeyForTopic(t *testing.T) {
-	tests := []struct {
-		key       string
-		wantChat  int64
-		wantTopic int
-	}{
-		{"telegram:-100123:456", -100123, 0},
-		{"telegram:-100123", -100123, 0},
-		{"telegram:-100123:topic:42:456", -100123, 42},
-		{"telegram:-100123:topic:42", -100123, 42},
-		{"invalid", 0, 0},
-		{"feishu:abc", 0, 0},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.key, func(t *testing.T) {
-			chatID, topicID := parseSessionKeyForTopic(tt.key)
-			if chatID != tt.wantChat || topicID != tt.wantTopic {
-				t.Errorf("parseSessionKeyForTopic(%q) = (%d, %d), want (%d, %d)",
-					tt.key, chatID, topicID, tt.wantChat, tt.wantTopic)
-			}
-		})
-	}
-}
-
-func TestResolveTopicWorkDir(t *testing.T) {
-	p := &Platform{
-		topicWorkDirs: []topicWorkDir{
-			{ChatID: -100123, TopicID: 42, WorkDir: "/home/user/backend"},
-			{ChatID: -100123, TopicID: 0, WorkDir: "/home/user/main"},
-			{ChatID: -100999, TopicID: 10, WorkDir: "/home/user/other"},
-		},
-	}
-
-	tests := []struct {
-		sessionKey string
-		wantDir    string
-	}{
-		{"telegram:-100123:topic:42:456", "/home/user/backend"},
-		{"telegram:-100123:456", "/home/user/main"},
-		{"telegram:-100123:topic:0:456", "/home/user/main"},
-		{"telegram:-100999:topic:10:789", "/home/user/other"},
-		{"telegram:-100999:789", ""},     // no mapping for topic 0 in chat -100999
-		{"telegram:-100888:456", ""},      // unknown chat
-		{"feishu:abc", ""},                // wrong platform
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.sessionKey, func(t *testing.T) {
-			got := p.ResolveTopicWorkDir(tt.sessionKey)
-			if got != tt.wantDir {
-				t.Errorf("ResolveTopicWorkDir(%q) = %q, want %q",
-					tt.sessionKey, got, tt.wantDir)
-			}
-		})
-	}
-}
-
 func TestExtractForumFields(t *testing.T) {
 	t.Run("message with forum fields", func(t *testing.T) {
 		raw := json.RawMessage(`{

@@ -28,19 +28,11 @@ type replyContext struct {
 	messageThreadID int // forum topic ID; 0 = General / no forum
 }
 
-// topicWorkDir maps a chat+topic combination to a working directory.
-type topicWorkDir struct {
-	ChatID  int64
-	TopicID int
-	WorkDir string
-}
-
 type Platform struct {
 	token                 string
 	allowFrom             string
 	groupReplyAll         bool
 	shareSessionInChannel bool
-	topicWorkDirs         []topicWorkDir
 	bot                   *tgbotapi.BotAPI
 	httpClient            *http.Client
 	handler               core.MessageHandler
@@ -74,44 +66,10 @@ func New(opts map[string]any) (core.Platform, error) {
 	groupReplyAll, _ := opts["group_reply_all"].(bool)
 	shareSessionInChannel, _ := opts["share_session_in_channel"].(bool)
 
-	// Parse topic_workdirs configuration
-	var twds []topicWorkDir
-	if rawList, ok := opts["topic_workdirs"].([]any); ok {
-		for _, item := range rawList {
-			m, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			var twd topicWorkDir
-			switch v := m["chat_id"].(type) {
-			case int64:
-				twd.ChatID = v
-			case float64:
-				twd.ChatID = int64(v)
-			case string:
-				twd.ChatID, _ = strconv.ParseInt(v, 10, 64)
-			}
-			switch v := m["topic_id"].(type) {
-			case int64:
-				twd.TopicID = int(v)
-			case float64:
-				twd.TopicID = int(v)
-			}
-			if dir, ok := m["work_dir"].(string); ok {
-				twd.WorkDir = dir
-			}
-			if twd.ChatID != 0 && twd.WorkDir != "" {
-				twds = append(twds, twd)
-				slog.Info("telegram: topic workdir mapping",
-					"chat_id", twd.ChatID, "topic_id", twd.TopicID, "work_dir", twd.WorkDir)
-			}
-		}
-	}
-
 	return &Platform{
 		token: token, allowFrom: allowFrom,
 		groupReplyAll: groupReplyAll, shareSessionInChannel: shareSessionInChannel,
-		topicWorkDirs: twds, httpClient: httpClient,
+		httpClient: httpClient,
 	}, nil
 }
 
@@ -1063,37 +1021,6 @@ func (p *Platform) Stop() error {
 		p.bot.StopReceivingUpdates()
 	}
 	return nil
-}
-
-// ResolveTopicWorkDir implements core.TopicWorkDirResolver.
-// It looks up the configured work_dir for the given session key's chat+topic combination.
-func (p *Platform) ResolveTopicWorkDir(sessionKey string) string {
-	if len(p.topicWorkDirs) == 0 {
-		return ""
-	}
-	chatID, topicID := parseSessionKeyForTopic(sessionKey)
-	if chatID == 0 {
-		return ""
-	}
-	for _, twd := range p.topicWorkDirs {
-		if twd.ChatID == chatID && twd.TopicID == topicID {
-			return twd.WorkDir
-		}
-	}
-	return ""
-}
-
-// parseSessionKeyForTopic extracts chatID and topicID from a session key.
-func parseSessionKeyForTopic(sessionKey string) (chatID int64, topicID int) {
-	parts := strings.SplitN(sessionKey, ":", 5)
-	if len(parts) < 2 || parts[0] != "telegram" {
-		return 0, 0
-	}
-	chatID, _ = strconv.ParseInt(parts[1], 10, 64)
-	if len(parts) >= 4 && parts[2] == "topic" {
-		topicID, _ = strconv.Atoi(parts[3])
-	}
-	return chatID, topicID
 }
 
 // RegisterCommands registers bot commands with Telegram for the command menu.
