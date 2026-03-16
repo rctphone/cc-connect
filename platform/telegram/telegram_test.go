@@ -2,7 +2,9 @@ package telegram
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestExtractEntityText(t *testing.T) {
@@ -221,5 +223,179 @@ func TestReconstructReplyCtx_WithTopic(t *testing.T) {
 				t.Errorf("messageThreadID = %d, want %d", rc.messageThreadID, tt.wantTopic)
 			}
 		})
+	}
+}
+
+// --- sendBatcher tests ---
+
+type sentMsg struct {
+	chatID   int64
+	text     string
+	replyTo  int
+	threadID int
+}
+
+func collectingSender(mu *sync.Mutex, sent *[]sentMsg) func(int64, string, int, int) error {
+	return func(chatID int64, text string, replyTo, threadID int) error {
+		mu.Lock()
+		*sent = append(*sent, sentMsg{chatID, text, replyTo, threadID})
+		mu.Unlock()
+		return nil
+	}
+}
+
+func TestBatcher_SingleMessage(t *testing.T) {
+	var mu sync.Mutex
+	var sent []sentMsg
+	b := newSendBatcher(50*time.Millisecond, collectingSender(&mu, &sent))
+
+	b.enqueue(100, 0, 0, "hello")
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 send, got %d", len(sent))
+	}
+	if sent[0].text != "hello" {
+		t.Errorf("text = %q, want %q", sent[0].text, "hello")
+	}
+	if sent[0].chatID != 100 {
+		t.Errorf("chatID = %d, want 100", sent[0].chatID)
+	}
+}
+
+func TestBatcher_CoalesceTwo(t *testing.T) {
+	var mu sync.Mutex
+	var sent []sentMsg
+	b := newSendBatcher(100*time.Millisecond, collectingSender(&mu, &sent))
+
+	b.enqueue(100, 0, 0, "first")
+	b.enqueue(100, 0, 0, "second")
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 coalesced send, got %d", len(sent))
+	}
+	if sent[0].text != "first\n\nsecond" {
+		t.Errorf("text = %q, want %q", sent[0].text, "first\n\nsecond")
+	}
+}
+
+func TestBatcher_MaxLenSplit(t *testing.T) {
+	var mu sync.Mutex
+	var sent []sentMsg
+	b := newSendBatcher(100*time.Millisecond, collectingSender(&mu, &sent))
+	b.maxLen = 20 // force small max
+
+	b.enqueue(100, 0, 0, "aaaaaaaaaa") // 10 chars
+	b.enqueue(100, 0, 0, "bbbbbbbbbb") // 10 chars — total 10+2+10=22 > 20
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 2 {
+		t.Fatalf("expected 2 sends (split by maxLen), got %d", len(sent))
+	}
+	if sent[0].text != "aaaaaaaaaa" {
+		t.Errorf("first text = %q, want %q", sent[0].text, "aaaaaaaaaa")
+	}
+	if sent[1].text != "bbbbbbbbbb" {
+		t.Errorf("second text = %q, want %q", sent[1].text, "bbbbbbbbbb")
+	}
+}
+
+func TestBatcher_FlushChat(t *testing.T) {
+	var mu sync.Mutex
+	var sent []sentMsg
+	b := newSendBatcher(5*time.Second, collectingSender(&mu, &sent)) // long delay
+
+	b.enqueue(100, 0, 0, "buffered")
+	b.flushChat(100, 0)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 send after flushChat, got %d", len(sent))
+	}
+	if sent[0].text != "buffered" {
+		t.Errorf("text = %q, want %q", sent[0].text, "buffered")
+	}
+}
+
+func TestBatcher_DifferentChats(t *testing.T) {
+	var mu sync.Mutex
+	var sent []sentMsg
+	b := newSendBatcher(50*time.Millisecond, collectingSender(&mu, &sent))
+
+	b.enqueue(100, 0, 0, "chat100")
+	b.enqueue(200, 0, 0, "chat200")
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 2 {
+		t.Fatalf("expected 2 sends (different chats), got %d", len(sent))
+	}
+	// Order not guaranteed, check both present
+	texts := map[string]bool{sent[0].text: true, sent[1].text: true}
+	if !texts["chat100"] || !texts["chat200"] {
+		t.Errorf("expected chat100 and chat200, got %q and %q", sent[0].text, sent[1].text)
+	}
+}
+
+func TestBatcher_DifferentReplyTo(t *testing.T) {
+	var mu sync.Mutex
+	var sent []sentMsg
+	b := newSendBatcher(100*time.Millisecond, collectingSender(&mu, &sent))
+
+	b.enqueue(100, 0, 0, "send-msg")
+	b.enqueue(100, 0, 42, "reply-msg") // different replyTo → flush first
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 2 {
+		t.Fatalf("expected 2 sends (different replyTo), got %d", len(sent))
+	}
+	if sent[0].text != "send-msg" || sent[0].replyTo != 0 {
+		t.Errorf("first: text=%q replyTo=%d, want send-msg/0", sent[0].text, sent[0].replyTo)
+	}
+	if sent[1].text != "reply-msg" || sent[1].replyTo != 42 {
+		t.Errorf("second: text=%q replyTo=%d, want reply-msg/42", sent[1].text, sent[1].replyTo)
+	}
+}
+
+func TestBatcher_FlushAll(t *testing.T) {
+	var mu sync.Mutex
+	var sent []sentMsg
+	b := newSendBatcher(5*time.Second, collectingSender(&mu, &sent)) // long delay
+
+	b.enqueue(100, 0, 0, "a")
+	b.enqueue(200, 5, 0, "b")
+	b.flushAll()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 2 {
+		t.Fatalf("expected 2 sends after flushAll, got %d", len(sent))
+	}
+}
+
+func TestBatcher_DifferentThreads(t *testing.T) {
+	var mu sync.Mutex
+	var sent []sentMsg
+	b := newSendBatcher(50*time.Millisecond, collectingSender(&mu, &sent))
+
+	b.enqueue(100, 0, 0, "general")
+	b.enqueue(100, 42, 0, "topic42")
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 2 {
+		t.Fatalf("expected 2 sends (different threads), got %d", len(sent))
 	}
 }

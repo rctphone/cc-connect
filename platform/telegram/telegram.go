@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf16"
 
@@ -29,6 +30,110 @@ type replyContext struct {
 	messageThreadID int // forum topic ID; 0 = General / no forum
 }
 
+// --- Send batcher: coalesces rapid text messages into one API call ---
+
+type sendBufferKey struct {
+	chatID   int64
+	threadID int
+}
+
+type sendBufferEntry struct {
+	parts    []string
+	totalLen int
+	timer    *time.Timer
+	replyTo  int // 0 = Send, >0 = Reply
+}
+
+type sendBatcher struct {
+	mu      sync.Mutex
+	buffers map[sendBufferKey]*sendBufferEntry
+	delay   time.Duration
+	maxLen  int
+	send    func(chatID int64, text string, replyTo, threadID int) error
+}
+
+func newSendBatcher(delay time.Duration, send func(chatID int64, text string, replyTo, threadID int) error) *sendBatcher {
+	return &sendBatcher{
+		buffers: make(map[sendBufferKey]*sendBufferEntry),
+		delay:   delay,
+		maxLen:  4000,
+		send:    send,
+	}
+}
+
+func (b *sendBatcher) enqueue(chatID int64, threadID, replyTo int, text string) error {
+	key := sendBufferKey{chatID: chatID, threadID: threadID}
+
+	b.mu.Lock()
+	entry, ok := b.buffers[key]
+
+	// If existing entry has a different replyTo, or adding would exceed maxLen → flush first
+	if ok && (entry.replyTo != replyTo || entry.totalLen+len(text)+2 > b.maxLen) {
+		entry.timer.Stop()
+		delete(b.buffers, key)
+		b.mu.Unlock()
+		if err := b.send(chatID, strings.Join(entry.parts, "\n\n"), entry.replyTo, threadID); err != nil {
+			return err
+		}
+		b.mu.Lock()
+		entry = nil
+		ok = false
+	}
+
+	if !ok {
+		entry = &sendBufferEntry{replyTo: replyTo}
+		b.buffers[key] = entry
+	}
+
+	if len(entry.parts) > 0 {
+		entry.totalLen += 2 // for "\n\n"
+	}
+	entry.parts = append(entry.parts, text)
+	entry.totalLen += len(text)
+
+	// Reset timer
+	if entry.timer != nil {
+		entry.timer.Stop()
+	}
+	entry.timer = time.AfterFunc(b.delay, func() { b.flush(key) })
+
+	b.mu.Unlock()
+	return nil
+}
+
+func (b *sendBatcher) flush(key sendBufferKey) {
+	b.mu.Lock()
+	entry, ok := b.buffers[key]
+	if !ok {
+		b.mu.Unlock()
+		return
+	}
+	entry.timer.Stop()
+	delete(b.buffers, key)
+	b.mu.Unlock()
+
+	if err := b.send(key.chatID, strings.Join(entry.parts, "\n\n"), entry.replyTo, key.threadID); err != nil {
+		slog.Error("telegram: batcher flush failed", "chat", key.chatID, "error", err)
+	}
+}
+
+func (b *sendBatcher) flushChat(chatID int64, threadID int) {
+	b.flush(sendBufferKey{chatID: chatID, threadID: threadID})
+}
+
+func (b *sendBatcher) flushAll() {
+	b.mu.Lock()
+	keys := make([]sendBufferKey, 0, len(b.buffers))
+	for k := range b.buffers {
+		keys = append(keys, k)
+	}
+	b.mu.Unlock()
+
+	for _, k := range keys {
+		b.flush(k)
+	}
+}
+
 type Platform struct {
 	token                 string
 	allowFrom             string
@@ -39,6 +144,7 @@ type Platform struct {
 	httpClient            *http.Client
 	handler               core.MessageHandler
 	cancel                context.CancelFunc
+	batcher               *sendBatcher
 }
 
 func New(opts map[string]any) (core.Platform, error) {
@@ -97,12 +203,32 @@ func New(opts map[string]any) (core.Platform, error) {
 		}
 	}
 
-	return &Platform{
+	// Parse batch delay (default 200ms, 0 = disabled)
+	batchDelayMs := 200
+	if v, ok := opts["batch_delay_ms"].(int64); ok {
+		batchDelayMs = int(v)
+	} else if v, ok := opts["batch_delay_ms"].(float64); ok {
+		batchDelayMs = int(v)
+	}
+
+	p := &Platform{
 		token: token, allowFrom: allowFrom,
 		groupReplyAll: groupReplyAll, groupReplyAllChats: replyAllChats,
 		shareSessionInChannel: shareSessionInChannel,
 		httpClient: httpClient,
-	}, nil
+	}
+
+	if batchDelayMs > 0 {
+		p.batcher = newSendBatcher(
+			time.Duration(batchDelayMs)*time.Millisecond,
+			func(chatID int64, text string, replyTo, threadID int) error {
+				_, err := p.sendWithFallback(chatID, text, replyTo, threadID, nil)
+				return err
+			},
+		)
+	}
+
+	return p, nil
 }
 
 func (p *Platform) Name() string { return "telegram" }
@@ -727,6 +853,9 @@ func (p *Platform) Reply(ctx context.Context, rctx any, content string) error {
 	if !ok {
 		return fmt.Errorf("telegram: invalid reply context type %T", rctx)
 	}
+	if p.batcher != nil {
+		return p.batcher.enqueue(rc.chatID, rc.messageThreadID, rc.messageID, content)
+	}
 	_, err := p.sendWithFallback(rc.chatID, content, rc.messageID, rc.messageThreadID, nil)
 	if err != nil {
 		return fmt.Errorf("telegram: reply: %w", err)
@@ -740,6 +869,9 @@ func (p *Platform) Send(ctx context.Context, rctx any, content string) error {
 	if !ok {
 		return fmt.Errorf("telegram: invalid reply context type %T", rctx)
 	}
+	if p.batcher != nil {
+		return p.batcher.enqueue(rc.chatID, rc.messageThreadID, 0, content)
+	}
 	_, err := p.sendWithFallback(rc.chatID, content, 0, rc.messageThreadID, nil)
 	if err != nil {
 		return fmt.Errorf("telegram: send: %w", err)
@@ -752,6 +884,9 @@ func (p *Platform) SendWithButtons(ctx context.Context, rctx any, content string
 	rc, ok := rctx.(replyContext)
 	if !ok {
 		return fmt.Errorf("telegram: invalid reply context type %T", rctx)
+	}
+	if p.batcher != nil {
+		p.batcher.flushChat(rc.chatID, rc.messageThreadID)
 	}
 
 	var rows [][]tgbotapi.InlineKeyboardButton
@@ -798,6 +933,9 @@ func (p *Platform) SendTrackable(ctx context.Context, rctx any, content string) 
 	if !ok {
 		return nil, fmt.Errorf("telegram: invalid reply context type %T", rctx)
 	}
+	if p.batcher != nil {
+		p.batcher.flushChat(rc.chatID, rc.messageThreadID)
+	}
 	msgID, err := p.sendWithFallback(rc.chatID, content, 0, rc.messageThreadID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("telegram: sendTrackable: %w", err)
@@ -832,6 +970,9 @@ func (p *Platform) SendAndPin(ctx context.Context, rctx any, content string) (an
 	rc, ok := rctx.(replyContext)
 	if !ok {
 		return nil, fmt.Errorf("telegram: invalid reply context type %T", rctx)
+	}
+	if p.batcher != nil {
+		p.batcher.flushChat(rc.chatID, rc.messageThreadID)
 	}
 	msgID, err := p.sendWithFallback(rc.chatID, content, 0, rc.messageThreadID, nil)
 	if err != nil {
@@ -987,6 +1128,9 @@ func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content strin
 	if !ok {
 		return nil, fmt.Errorf("telegram: invalid reply context type %T", rctx)
 	}
+	if p.batcher != nil {
+		p.batcher.flushChat(rc.chatID, rc.messageThreadID)
+	}
 
 	msgID, err := p.sendWithFallback(rc.chatID, content, 0, rc.messageThreadID, nil)
 	if err != nil {
@@ -1069,6 +1213,9 @@ func (p *Platform) StartTyping(ctx context.Context, rctx any) (stop func()) {
 }
 
 func (p *Platform) Stop() error {
+	if p.batcher != nil {
+		p.batcher.flushAll()
+	}
 	if p.cancel != nil {
 		p.cancel()
 	}
