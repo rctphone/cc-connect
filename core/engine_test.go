@@ -2377,7 +2377,7 @@ func TestSessionMismatch_RecyclesStaleAgent(t *testing.T) {
 	// The active Session now wants a DIFFERENT agent session ID.
 	session := &Session{AgentSessionID: "new-agent-id"}
 
-	state := e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil)
+	state := e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil, e.sessions)
 
 	if state.agentSession == oldSess {
 		t.Fatal("expected stale agent session to be replaced")
@@ -2416,7 +2416,7 @@ func TestSessionMismatch_DoesNotLeakQuiet(t *testing.T) {
 	// Active session wants "new-id", which mismatches "old-id".
 	session := &Session{AgentSessionID: "new-id"}
 
-	state := e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil)
+	state := e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil, e.sessions)
 
 	state.mu.Lock()
 	q := state.quiet
@@ -2447,7 +2447,7 @@ func TestSessionMismatch_ReusesWhenIDsMatch(t *testing.T) {
 
 	session := &Session{AgentSessionID: "matching-id"}
 
-	state := e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil)
+	state := e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil, e.sessions)
 	if state != existingState {
 		t.Fatal("expected existing state to be reused when session IDs match")
 	}
@@ -2465,7 +2465,7 @@ func TestSessionIDWriteback_ImmediateAfterStartSession(t *testing.T) {
 	key := "test:user1"
 	session := &Session{AgentSessionID: ""} // empty — no prior binding
 
-	e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil)
+	e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil, e.sessions)
 
 	got := session.GetAgentSessionID()
 
@@ -2485,7 +2485,7 @@ func TestSessionIDWriteback_DoesNotOverwriteExisting(t *testing.T) {
 	key := "test:user1"
 	session := &Session{AgentSessionID: "existing-uuid"}
 
-	e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil)
+	e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil, e.sessions)
 
 	got := session.GetAgentSessionID()
 
@@ -2521,7 +2521,7 @@ func TestStaleGoroutineCleanup_RaceSimulation(t *testing.T) {
 
 	// Step 3: New turn creates Session B and calls getOrCreateInteractiveStateWith.
 	sessionB := &Session{AgentSessionID: ""}
-	newState := e.getOrCreateInteractiveStateWith(key, p, "ctx", sessionB, nil)
+	newState := e.getOrCreateInteractiveStateWith(key, p, "ctx", sessionB, nil, e.sessions)
 
 	// Verify S2 is in the map.
 	e.interactiveMu.Lock()

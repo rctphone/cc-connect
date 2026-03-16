@@ -230,3 +230,34 @@ func TestSession_ConcurrentGetSet(t *testing.T) {
 		t.Errorf("final GetAgentSessionID = %q, want %q", got, "id")
 	}
 }
+
+func TestSessionManager_MigrateFrom(t *testing.T) {
+	src := NewSessionManager("")
+	s := src.GetOrCreateActive("user1")
+	s.SetAgentSessionID("agent-abc")
+	s.SetAgentInfo("agent-abc", "my session")
+
+	dst := NewSessionManager("")
+
+	// First migration should copy
+	dst.MigrateFrom(src, "user1")
+	active := dst.GetOrCreateActive("user1")
+	if got := active.GetAgentSessionID(); got != "agent-abc" {
+		t.Errorf("after MigrateFrom: AgentSessionID = %q, want %q", got, "agent-abc")
+	}
+
+	// Second migration is no-op (dst already has session)
+	s.SetAgentSessionID("agent-xyz")
+	dst.MigrateFrom(src, "user1")
+	if got := dst.GetOrCreateActive("user1").GetAgentSessionID(); got != "agent-abc" {
+		t.Errorf("second MigrateFrom should be no-op: got %q, want %q", got, "agent-abc")
+	}
+
+	// Migration of unknown user is no-op
+	dst2 := NewSessionManager("")
+	dst2.MigrateFrom(src, "unknown-user")
+	list := dst2.AllSessions()
+	if len(list) != 0 {
+		t.Errorf("MigrateFrom unknown user created %d sessions, want 0", len(list))
+	}
+}

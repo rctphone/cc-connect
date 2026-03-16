@@ -275,6 +275,7 @@ type interactiveState struct {
 	platform     Platform
 	replyCtx     any
 	workspaceDir string
+	sessions     *SessionManager // session manager for this state (workspace or main)
 	mu           sync.Mutex
 	pending      *pendingPermission
 	approveAll   bool // when true, auto-approve all permission requests for this session
@@ -1141,7 +1142,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		"session", session.ID,
 	)
 
-	go e.processInteractiveMessageWith(p, msg, session, agent, interactiveKey, resolvedWorkspace)
+	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, resolvedWorkspace)
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -1414,13 +1415,13 @@ func isDenyResponse(s string) bool {
 // ──────────────────────────────────────────────────────────────
 
 func (e *Engine) processInteractiveMessage(p Platform, msg *Message, session *Session) {
-	e.processInteractiveMessageWith(p, msg, session, e.agent, msg.SessionKey, "")
+	e.processInteractiveMessageWith(p, msg, session, e.agent, e.sessions, msg.SessionKey, "")
 }
 
 // processInteractiveMessageWith is the core interactive processing loop.
 // It accepts an explicit agent, interactiveKey (for the interactiveStates map),
 // and workspaceDir so that multi-workspace mode can route to per-workspace agents.
-func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session *Session, agent Agent, interactiveKey string, workspaceDir string) {
+func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session *Session, agent Agent, sessions *SessionManager, interactiveKey string, workspaceDir string) {
 	defer session.Unlock()
 
 	if e.ctx.Err() != nil {
@@ -1437,9 +1438,9 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	if agent != e.agent {
 		agentOverride = agent
 	}
-	state := e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, agentOverride)
+	state := e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, agentOverride, sessions)
 
-	// Set workspaceDir on the state for idle reaper identification
+	// Set workspaceDir and sessions on the state
 	if workspaceDir != "" {
 		state.mu.Lock()
 		state.workspaceDir = workspaceDir
@@ -1492,7 +1493,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 			e.cleanupInteractiveState(interactiveKey, state)
 			e.send(p, msg.ReplyCtx, e.i18n.T(MsgSessionRestarting))
 
-			state = e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, agentOverride)
+			state = e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, agentOverride, sessions)
 			if workspaceDir != "" {
 				state.mu.Lock()
 				state.workspaceDir = workspaceDir
@@ -1580,13 +1581,12 @@ func (e *Engine) getOrCreateWorkspaceAgent(workspace string) (Agent, *SessionMan
 }
 
 func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, replyCtx any, session *Session) *interactiveState {
-	return e.getOrCreateInteractiveStateWith(sessionKey, p, replyCtx, session, nil)
+	return e.getOrCreateInteractiveStateWith(sessionKey, p, replyCtx, session, nil, e.sessions)
 }
 
 // getOrCreateInteractiveStateWith is like getOrCreateInteractiveState but accepts
-// an optional agent override for multi-workspace mode. When agentOverride is non-nil
-// it is used instead of e.agent to start the session.
-func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, replyCtx any, session *Session, agentOverride Agent) *interactiveState {
+// an optional agent override and explicit session manager for multi-workspace mode.
+func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, replyCtx any, session *Session, agentOverride Agent, sessions *SessionManager) *interactiveState {
 	e.interactiveMu.Lock()
 	defer e.interactiveMu.Unlock()
 
@@ -1685,6 +1685,7 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 		platform:     p,
 		replyCtx:     replyCtx,
 		quiet:        quietMode,
+		sessions:     sessions,
 	}
 	e.interactiveStates[sessionKey] = state
 
@@ -2038,7 +2039,7 @@ func (e *Engine) handleQueueResponse(p Platform, msg *Message, content string) b
 			"user", msg.UserName,
 		)
 
-		go e.processInteractiveMessageWith(p, queuedMsg, session, agent, interactiveKey, workspaceDir)
+		go e.processInteractiveMessageWith(p, queuedMsg, session, agent, sessions, interactiveKey, workspaceDir)
 
 	case "skip":
 		items := parseQueuePin(state.queue.cachedContent)
@@ -2170,7 +2171,7 @@ func (e *Engine) handleQueueResponseStateless(p Platform, msg *Message, action s
 
 		slog.Info("stateless: processing queued message",
 			"session", interactiveKey, "user", msg.UserName)
-		go e.processInteractiveMessageWith(p, queuedMsg, session, agent, interactiveKey, workspaceDir)
+		go e.processInteractiveMessageWith(p, queuedMsg, session, agent, sessions, interactiveKey, workspaceDir)
 
 	default:
 		return false
@@ -2296,8 +2297,9 @@ func (e *Engine) resumeQueuedMessages() {
 			state.mu.Lock()
 			state.queue.cachedContent = content
 			state.queue.pinnedHandle = handle
-			state.queue.agent = e.agent
-			state.queue.sessions = e.sessions
+			qAgent, qSessions := e.sessionContextForKey(key)
+			state.queue.agent = qAgent
+			state.queue.sessions = qSessions
 			state.mu.Unlock()
 
 			go e.processNextInQueue(key)
@@ -2507,9 +2509,9 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				if session.CompareAndSetAgentSessionID(event.SessionID) {
 					pendingName := session.GetName()
 					if pendingName != "" && pendingName != "session" && pendingName != "default" {
-						e.sessions.SetSessionName(event.SessionID, pendingName)
+						state.sessions.SetSessionName(event.SessionID, pendingName)
 					}
-					e.sessions.Save()
+					state.sessions.Save()
 				}
 			}
 
@@ -2605,7 +2607,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			}
 
 			session.AddHistory("assistant", fullResponse)
-			e.sessions.Save()
+			state.sessions.Save()
 
 			turnDuration := time.Since(turnStart)
 			slog.Info("turn complete",
@@ -4430,10 +4432,11 @@ func (e *Engine) cmdModel(p Platform, msg *Message, args []string) {
 	switcher.SetModel(target)
 	e.cleanupInteractiveState(msg.SessionKey)
 
-	s := e.sessions.GetOrCreateActive(msg.SessionKey)
+	_, sm, _, _ := e.commandContext(p, msg)
+	s := sm.GetOrCreateActive(msg.SessionKey)
 	s.SetAgentSessionID("")
 	s.ClearHistory()
-	e.sessions.Save()
+	sm.Save()
 
 	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgModelChanged, target))
 }
@@ -4511,10 +4514,11 @@ func (e *Engine) cmdReasoning(p Platform, msg *Message, args []string) {
 	switcher.SetReasoningEffort(target)
 	e.cleanupInteractiveState(msg.SessionKey)
 
-	s := e.sessions.GetOrCreateActive(msg.SessionKey)
+	_, sm, _, _ := e.commandContext(p, msg)
+	s := sm.GetOrCreateActive(msg.SessionKey)
 	s.SetAgentSessionID("")
 	s.ClearHistory()
-	e.sessions.Save()
+	sm.Save()
 
 	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgReasoningChanged, target))
 }
@@ -5483,10 +5487,11 @@ func (e *Engine) executeCardAction(cmd, args, sessionKey string) {
 		}
 		switcher.SetModel(target)
 		e.cleanupInteractiveState(sessionKey)
-		s := e.sessions.GetOrCreateActive(sessionKey)
+		_, sm := e.sessionContextForKey(sessionKey)
+		s := sm.GetOrCreateActive(sessionKey)
 		s.SetAgentSessionID("")
 		s.ClearHistory()
-		e.sessions.Save()
+		sm.Save()
 
 	case "/reasoning":
 		if args == "" {
@@ -5505,10 +5510,11 @@ func (e *Engine) executeCardAction(cmd, args, sessionKey string) {
 			if effort == target {
 				switcher.SetReasoningEffort(target)
 				e.cleanupInteractiveState(sessionKey)
-				s := e.sessions.GetOrCreateActive(sessionKey)
+				_, sm := e.sessionContextForKey(sessionKey)
+				s := sm.GetOrCreateActive(sessionKey)
 				s.SetAgentSessionID("")
 				s.ClearHistory()
-				e.sessions.Save()
+				sm.Save()
 				return
 			}
 		}
