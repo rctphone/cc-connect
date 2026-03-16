@@ -568,6 +568,31 @@ func renderTableInline(b *strings.Builder, rows [][]string) {
 	}
 }
 
+// WrapHTMLDocument wraps an HTML body fragment in a full HTML document with
+// mobile-friendly viewport and minimal CSS for readability.
+func WrapHTMLDocument(title, body string) string {
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>` + escapeHTML(title) + `</title>
+<style>
+body { font-family: -apple-system, system-ui, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 16px; color: #1a1a1a; }
+pre { background: #f4f4f4; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 14px; }
+code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 14px; }
+pre code { background: none; padding: 0; }
+blockquote { border-left: 3px solid #ddd; margin: 0; padding-left: 12px; color: #555; }
+a { color: #0366d6; }
+b { font-weight: 600; }
+</style>
+</head>
+<body>
+` + body + `
+</body>
+</html>`
+}
+
 // SplitMessageCodeFenceAware splits text into chunks respecting code fence boundaries.
 // When a chunk boundary falls inside a code block, the fence is closed at the end of
 // the chunk and re-opened at the start of the next chunk.

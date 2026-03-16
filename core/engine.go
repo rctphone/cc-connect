@@ -2324,6 +2324,9 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 	waitStart := time.Now()
 	firstEventLogged := false
 
+	// Track last written file for "Send file" button
+	var lastWrittenFile string
+
 	// Compact tools: track sent tool messages for cleanup on success
 	var compactToolHandles []any
 	var compactTracker CompactToolTracker
@@ -2435,6 +2438,14 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 
 		case EventToolUse:
 			toolCount++
+			// Track Write tool calls for "Send file" button
+			if event.ToolName == "Write" || event.ToolName == "write_to_file" {
+				path := event.ToolInput
+				ext := strings.ToLower(filepath.Ext(path))
+				if ext == ".md" || ext == ".txt" || ext == ".html" {
+					lastWrittenFile = path
+				}
+			}
 			if !quiet {
 				// Flush accumulated text segment before tool display
 				previewActive := sp.canPreview()
@@ -2654,6 +2665,21 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			// Clean up compact tool progress messages after successful completion
 			if compactTracker != nil && len(compactToolHandles) > 0 {
 				go compactTracker.DeleteMessages(e.ctx, replyCtxForTracker, compactToolHandles)
+			}
+
+			// Offer "Send file" button if the agent wrote a suitable file
+			if lastWrittenFile != "" {
+				if info, err := os.Stat(lastWrittenFile); err == nil && info.Size() > 200 {
+					btnText := "\U0001F4CE " + filepath.Base(lastWrittenFile)
+					callbackData := "file:" + lastWrittenFile
+					// Telegram callback_data limit is 64 bytes; truncate if needed
+					if len(callbackData) <= 64 {
+						buttons := [][]ButtonOption{{
+							{Text: btnText, Data: callbackData},
+						}}
+						e.replyWithButtons(p, replyCtx, "\u200b", buttons) // zero-width space as minimal content
+					}
+				}
 			}
 
 			// TTS: async voice reply if enabled
@@ -5130,6 +5156,48 @@ func (e *Engine) SendToSession(sessionKey, message string) error {
 	}
 
 	return p.Send(e.ctx, replyCtx, message)
+}
+
+// SendFileToSession sends a file to the platform associated with an active session.
+// If the platform supports FileSender, the file is sent as a document attachment.
+// Otherwise, falls back to sending a text message with the file path.
+func (e *Engine) SendFileToSession(sessionKey, fileName string, data []byte, caption string) error {
+	e.interactiveMu.Lock()
+	defer e.interactiveMu.Unlock()
+
+	var state *interactiveState
+	if sessionKey != "" {
+		state = e.interactiveStates[sessionKey]
+	} else {
+		for _, s := range e.interactiveStates {
+			state = s
+			break
+		}
+	}
+
+	if state == nil {
+		return fmt.Errorf("no active session found (key=%q)", sessionKey)
+	}
+
+	state.mu.Lock()
+	p := state.platform
+	replyCtx := state.replyCtx
+	state.mu.Unlock()
+
+	if p == nil {
+		return fmt.Errorf("no active session found (key=%q)", sessionKey)
+	}
+
+	if fs, ok := p.(FileSender); ok {
+		return fs.SendFile(e.ctx, replyCtx, fileName, data, caption)
+	}
+
+	// Fallback: send text with file info
+	msg := fmt.Sprintf("📎 %s (%d bytes)", fileName, len(data))
+	if caption != "" {
+		msg = caption + "\n" + msg
+	}
+	return p.Send(e.ctx, replyCtx, msg)
 }
 
 // sendPermissionPrompt sends a permission prompt with interactive buttons when

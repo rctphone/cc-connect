@@ -66,6 +66,15 @@ This sends a message to the target bot and waits for its response (printed to st
 The conversation is visible in the group chat and each bot maintains its own relay session.
 
 Environment variables CC_PROJECT and CC_SESSION_KEY are already set, so the relay knows which group chat to use.
+
+### Send files to the chat
+To send a file (report, document, etc.) to the user as a downloadable attachment:
+
+  cc-connect send-file <path>
+  cc-connect send-file --caption "Weekly report" results/report.md
+
+Markdown files (.md) are automatically converted to HTML for easy viewing on mobile.
+Environment variables CC_PROJECT and CC_SESSION_KEY are already set.
 `
 }
 
@@ -346,4 +355,10 @@ type PinnableMessage interface {
 // a pinned queue message in a chat. Used to restore queues after bot restart.
 type QueuePinReader interface {
 	FindQueuePin(ctx context.Context, replyCtx any) (content string, handle any, err error)
+}
+
+// FileSender is an optional interface for platforms that support sending files
+// as document attachments (e.g. Telegram sendDocument).
+type FileSender interface {
+	SendFile(ctx context.Context, replyCtx any, fileName string, data []byte, caption string) error
 }

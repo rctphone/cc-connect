@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -657,6 +659,37 @@ func (p *Platform) handleCallbackQueryWithForum(cb *tgbotapi.CallbackQuery, thre
 		return
 	}
 
+	// File send callbacks (file:/path/to/file)
+	if strings.HasPrefix(data, "file:") {
+		filePath := strings.TrimPrefix(data, "file:")
+		// Remove the button from the original message
+		p.apiEditMessageText(chatID, msgID, "\u200b", "", &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
+
+		// Read and send the file
+		fileData, err := os.ReadFile(filePath)
+		if err != nil {
+			slog.Error("telegram: file callback: read file failed", "path", filePath, "error", err)
+			return
+		}
+		fileName := filepath.Base(filePath)
+		// Convert .md → .html
+		if strings.HasSuffix(strings.ToLower(fileName), ".md") {
+			htmlContent := core.MarkdownToSimpleHTML(string(fileData))
+			fileData = []byte(core.WrapHTMLDocument(strings.TrimSuffix(fileName, filepath.Ext(fileName)), htmlContent))
+			fileName = strings.TrimSuffix(fileName, filepath.Ext(fileName)) + ".html"
+		}
+		params := make(tgbotapi.Params)
+		params.AddNonZero64("chat_id", chatID)
+		params.AddNonZero("message_thread_id", threadID)
+		files := []tgbotapi.RequestFile{
+			{Name: "document", Data: tgbotapi.FileBytes{Name: fileName, Bytes: fileData}},
+		}
+		if _, err := p.bot.UploadFiles("sendDocument", params, files); err != nil {
+			slog.Error("telegram: file callback: sendDocument failed", "error", err)
+		}
+		return
+	}
+
 	// Permission callbacks (perm:allow, perm:deny, perm:allow_all)
 	var responseText string
 	switch data {
@@ -956,6 +989,35 @@ func (p *Platform) DeleteMessages(ctx context.Context, rctx any, handles []any) 
 			slog.Debug("telegram: delete tracked message failed", "error", err, "msg_id", tm.messageID)
 		}
 	}
+}
+
+// SendFile implements core.FileSender.
+// Sends a file as a document attachment via Telegram's sendDocument API.
+func (p *Platform) SendFile(ctx context.Context, rctx any, fileName string, data []byte, caption string) error {
+	rc, ok := rctx.(replyContext)
+	if !ok {
+		return fmt.Errorf("telegram: invalid reply context type %T", rctx)
+	}
+	if p.batcher != nil {
+		p.batcher.flushChat(rc.chatID, rc.messageThreadID)
+	}
+
+	params := make(tgbotapi.Params)
+	params.AddNonZero64("chat_id", rc.chatID)
+	params.AddNonZero("message_thread_id", rc.messageThreadID)
+	params.AddNonEmpty("caption", caption)
+
+	files := []tgbotapi.RequestFile{
+		{
+			Name: "document",
+			Data: tgbotapi.FileBytes{Name: fileName, Bytes: data},
+		},
+	}
+
+	if _, err := p.bot.UploadFiles("sendDocument", params, files); err != nil {
+		return fmt.Errorf("telegram: sendDocument: %w", err)
+	}
+	return nil
 }
 
 // pinnedMsgHandle stores info needed to edit/unpin a pinned message.

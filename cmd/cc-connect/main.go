@@ -52,6 +52,9 @@ func main() {
 		case "send":
 			runSend(os.Args[2:])
 			return
+		case "send-file":
+			runSendFile(os.Args[2:])
+			return
 		case "cron":
 			runCron(os.Args[2:])
 			return
@@ -805,6 +808,9 @@ Commands:
   send               Send a message to an active session via internal API
                      (-m <text> | --stdin, -p <project>, -s <session>)
 
+  send-file           Send a file as a document attachment to the active chat
+                     (<path>, -c <caption>, -p <project>, -s <session>)
+
   cron               Manage scheduled tasks
     add              Create a scheduled task (-c <expr> --prompt <text>)
     list             List scheduled tasks
@@ -829,6 +835,7 @@ Examples:
   cc-connect daemon install           Install as a system service
   cc-connect daemon logs -f           Follow daemon logs
   cc-connect send -m "hello"          Send a message to the active session
+  cc-connect send-file report.md      Send a file to the active chat
   cc-connect cron list                List all scheduled tasks
   cc-connect update                   Update to the latest version
   cc-connect config-example           Print full config.toml example
