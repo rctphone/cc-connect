@@ -2829,6 +2829,8 @@ func TestCompactToolInput(t *testing.T) {
 		{"JSON prompt extraction", "WebFetch", `{"prompt":"Найди все велосипедные фонари"}`, 120, "", "`Найди все велосипедные фонари`"},
 		{"JSON command extraction", "Bash", `{"command":"ls -la"}`, 120, "", "`ls -la`"},
 		{"JSON url extraction", "WebFetch", `{"url":"https://example.com"}`, 120, "", "`https://example.com`"},
+		{"JSON array with objects", "TodoWrite", `{"todos":[{"content":"Read PA reports","activeForm":"Reading PA reports"},{"content":"Write summary"}]}`, 120, "", "`Reading PA reports (2 items)`"},
+		{"JSON nested object", "SomeTool", `{"config":{"name":"my-project","debug":true}}`, 120, "", "`my-project`"},
 		{"non-JSON unchanged", "Bash", "echo hello", 120, "", "`echo hello`"},
 	}
 	for _, tt := range tests {

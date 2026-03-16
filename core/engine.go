@@ -8023,6 +8023,72 @@ func extractJSONPrimaryValue(input string) string {
 			}
 		}
 	}
+	// Fallback: summarize non-string fields to avoid showing raw JSON.
+	// Collect string values from any field, or describe arrays/objects.
+	return flattenJSONSummary(parsed)
+}
+
+// flattenJSONSummary produces a short human-readable summary of a JSON object.
+// For string values it takes the value directly; for arrays it shows the first
+// element's primary string field; for nested objects it recurses once.
+func flattenJSONSummary(m map[string]any) string {
+	var parts []string
+	for k, v := range m {
+		switch val := v.(type) {
+		case string:
+			if val != "" {
+				parts = append(parts, val)
+			}
+		case []any:
+			if len(val) == 0 {
+				continue
+			}
+			// Try to extract a summary from the first element
+			if obj, ok := val[0].(map[string]any); ok {
+				elem := firstStringValue(obj)
+				if elem != "" {
+					if len(val) > 1 {
+						parts = append(parts, fmt.Sprintf("%s (%d items)", elem, len(val)))
+					} else {
+						parts = append(parts, elem)
+					}
+				}
+			} else if s, ok := val[0].(string); ok {
+				if len(val) > 1 {
+					parts = append(parts, fmt.Sprintf("%s (+%d)", s, len(val)-1))
+				} else {
+					parts = append(parts, s)
+				}
+			}
+		case map[string]any:
+			if s := firstStringValue(val); s != "" {
+				parts = append(parts, s)
+			}
+		default:
+			_ = k // skip numbers, bools, nulls
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// firstStringValue returns the first non-empty string value from a JSON object,
+// preferring content-like field names.
+func firstStringValue(m map[string]any) string {
+	// Check preferred fields first (activeForm is Claude's "doing X" status)
+	for _, key := range []string{
+		"activeForm", "title", "name", "summary", "label",
+		"description", "content", "text", "prompt", "message",
+	} {
+		if s, ok := m[key].(string); ok && s != "" {
+			return s
+		}
+	}
+	// Fall back to any string field
+	for _, v := range m {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
 	return ""
 }
 
