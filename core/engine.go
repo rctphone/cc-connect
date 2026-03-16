@@ -383,6 +383,7 @@ func (e *Engine) resolveConfigWorkspace(sessionKey string) string {
 	}
 	for _, cw := range e.configWorkspaces {
 		if cw.ChannelKey == key {
+			slog.Debug("config workspace matched", "channelKey", key, "workDir", cw.WorkDir, "name", cw.Name)
 			return cw.WorkDir
 		}
 	}
@@ -391,6 +392,7 @@ func (e *Engine) resolveConfigWorkspace(sessionKey string) string {
 	if chatOnly != key {
 		for _, cw := range e.configWorkspaces {
 			if cw.ChannelKey == chatOnly {
+				slog.Debug("config workspace fallback matched", "chatOnly", chatOnly, "workDir", cw.WorkDir)
 				return cw.WorkDir
 			}
 		}
@@ -1539,6 +1541,16 @@ func (e *Engine) getOrCreateWorkspaceAgent(workspace string) (Agent, *SessionMan
 	if ma, ok := e.agent.(interface{ GetMode() string }); ok {
 		if m := ma.GetMode(); m != "" {
 			opts["mode"] = m
+		}
+	}
+	// Copy allowed_tools
+	if at, ok := e.agent.(interface{ GetAllowedTools() []string }); ok {
+		if tools := at.GetAllowedTools(); len(tools) > 0 {
+			toolsAny := make([]any, len(tools))
+			for i, t := range tools {
+				toolsAny[i] = t
+			}
+			opts["allowed_tools"] = toolsAny
 		}
 	}
 
