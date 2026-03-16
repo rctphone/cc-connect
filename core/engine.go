@@ -1653,6 +1653,16 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 	}
 
 	agentSID := session.GetAgentSessionID()
+	// If no saved session ID, try to pick up the most recent agent session
+	// from disk. This recovers from daemon restarts that killed the process
+	// before the session ID was persisted.
+	if agentSID == "" {
+		if sessions, err := agent.ListSessions(e.ctx); err == nil && len(sessions) > 0 {
+			agentSID = sessions[0].ID // sorted by ModifiedAt desc
+			session.CompareAndSetAgentSessionID(agentSID)
+			slog.Info("recovered agent session from disk", "session_key", sessionKey, "agent_session", agentSID)
+		}
+	}
 	startAt := time.Now()
 	agentSession, err := agent.StartSession(e.ctx, agentSID)
 	startElapsed := time.Since(startAt)
