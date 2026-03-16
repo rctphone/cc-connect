@@ -32,6 +32,7 @@ type Platform struct {
 	token                 string
 	allowFrom             string
 	groupReplyAll         bool
+	groupReplyAllChats    map[int64]string // chatID → allow_from filter ("" = all, "id1,id2" = specific users)
 	shareSessionInChannel bool
 	bot                   *tgbotapi.BotAPI
 	httpClient            *http.Client
@@ -66,9 +67,39 @@ func New(opts map[string]any) (core.Platform, error) {
 	groupReplyAll, _ := opts["group_reply_all"].(bool)
 	shareSessionInChannel, _ := opts["share_session_in_channel"].(bool)
 
+	// Parse group_reply_all_chats: map of chatID → {from: "user1,user2"} or list of chatIDs
+	replyAllChats := make(map[int64]string)
+	switch v := opts["group_reply_all_chats"].(type) {
+	case map[string]any:
+		// map format: {"<chatID>": {"from": "user1,user2"}, ...}
+		for chatIDStr, val := range v {
+			chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
+			if err != nil {
+				continue
+			}
+			if m, ok := val.(map[string]any); ok {
+				from, _ := m["from"].(string)
+				replyAllChats[chatID] = from
+			} else {
+				replyAllChats[chatID] = "" // no filter
+			}
+		}
+	case []any:
+		// simple list format: [-5241100085, ...]
+		for _, item := range v {
+			switch id := item.(type) {
+			case int64:
+				replyAllChats[id] = ""
+			case float64:
+				replyAllChats[int64(id)] = ""
+			}
+		}
+	}
+
 	return &Platform{
 		token: token, allowFrom: allowFrom,
-		groupReplyAll: groupReplyAll, shareSessionInChannel: shareSessionInChannel,
+		groupReplyAll: groupReplyAll, groupReplyAllChats: replyAllChats,
+		shareSessionInChannel: shareSessionInChannel,
 		httpClient: httpClient,
 	}, nil
 }
@@ -243,10 +274,12 @@ func (p *Platform) handleMessageUpdate(msg *tgbotapi.Message, ff forumFields) {
 
 	isGroup := msg.Chat.Type == "group" || msg.Chat.Type == "supergroup"
 
-	// In group chats, filter messages not directed at this bot (unless group_reply_all)
+	// In group chats, filter messages not directed at this bot (unless group_reply_all or per-chat override)
 	if isGroup && !p.groupReplyAll {
-		slog.Debug("telegram: checking group message", "bot", p.bot.Self.UserName, "text", msg.Text, "is_command", msg.IsCommand())
-		if !p.isDirectedAtBot(msg) {
+		fromFilter, hasPerChat := p.groupReplyAllChats[msg.Chat.ID]
+		if hasPerChat && core.AllowList(fromFilter, userID) {
+			// Per-chat reply_all enabled and user is allowed — process without mention
+		} else if !p.isDirectedAtBot(msg) {
 			return
 		}
 	}
