@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -639,6 +640,27 @@ func (p *Platform) isDirectedAtBot(msg *tgbotapi.Message) bool {
 // BotAPI.MakeRequest directly to include the field.
 
 // apiSendMessage sends a message via the Telegram API, optionally into a forum topic.
+// makeRequestWithRetry wraps bot.MakeRequest with automatic retry on 429 Too Many Requests.
+// Retries up to 3 times, sleeping for the duration specified by Telegram's retry_after.
+func (p *Platform) makeRequestWithRetry(method string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+	const maxRetries = 3
+	for attempt := 0; ; attempt++ {
+		resp, err := p.bot.MakeRequest(method, params)
+		if err == nil {
+			return resp, nil
+		}
+		var tgErr *tgbotapi.Error
+		if attempt < maxRetries && errors.As(err, &tgErr) && tgErr.RetryAfter > 0 {
+			wait := time.Duration(tgErr.RetryAfter) * time.Second
+			slog.Warn("telegram: rate limited, retrying",
+				"method", method, "retry_after", tgErr.RetryAfter, "attempt", attempt+1)
+			time.Sleep(wait)
+			continue
+		}
+		return nil, err
+	}
+}
+
 func (p *Platform) apiSendMessage(chatID int64, text, parseMode string, replyToMsgID, threadID int, markup *tgbotapi.InlineKeyboardMarkup) (int, error) {
 	params := make(tgbotapi.Params)
 	params.AddNonZero64("chat_id", chatID)
@@ -650,7 +672,7 @@ func (p *Platform) apiSendMessage(chatID int64, text, parseMode string, replyToM
 		data, _ := json.Marshal(markup)
 		params["reply_markup"] = string(data)
 	}
-	resp, err := p.bot.MakeRequest("sendMessage", params)
+	resp, err := p.makeRequestWithRetry("sendMessage", params)
 	if err != nil {
 		return 0, err
 	}
@@ -672,7 +694,7 @@ func (p *Platform) apiEditMessageText(chatID int64, msgID int, text, parseMode s
 		data, _ := json.Marshal(markup)
 		params["reply_markup"] = string(data)
 	}
-	_, err := p.bot.MakeRequest("editMessageText", params)
+	_, err := p.makeRequestWithRetry("editMessageText", params)
 	return err
 }
 
