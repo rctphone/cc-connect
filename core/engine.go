@@ -1109,6 +1109,8 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		sessions = wsSessions
 		agent = wsAgent
 		interactiveKey = resolvedWorkspace + ":" + msg.SessionKey
+		// Migrate session from main session manager if workspace has none
+		sessions.MigrateFrom(e.sessions, msg.SessionKey)
 	}
 
 	session := sessions.GetOrCreateActive(msg.SessionKey)

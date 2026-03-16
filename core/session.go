@@ -313,6 +313,60 @@ func (sm *SessionManager) DeleteByID(id string) bool {
 	return true
 }
 
+// MigrateFrom copies the active session for userKey from src into sm,
+// but only if sm has no sessions for that userKey yet. This handles the case
+// where a workspace config is added and the existing session was tracked by the
+// main (non-workspace) session manager. The migration is a one-time copy;
+// subsequent calls are no-ops.
+func (sm *SessionManager) MigrateFrom(src *SessionManager, userKey string) {
+	sm.mu.Lock()
+	if _, exists := sm.activeSession[userKey]; exists {
+		sm.mu.Unlock()
+		return // already has sessions for this user
+	}
+	sm.mu.Unlock()
+
+	src.mu.RLock()
+	srcSID, ok := src.activeSession[userKey]
+	if !ok {
+		src.mu.RUnlock()
+		return
+	}
+	srcSession := src.sessions[srcSID]
+	if srcSession == nil {
+		src.mu.RUnlock()
+		return
+	}
+	agentSID := srcSession.GetAgentSessionID()
+	name := srcSession.Name
+	src.mu.RUnlock()
+
+	if agentSID == "" {
+		return
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	// Double-check after re-acquiring lock
+	if _, exists := sm.activeSession[userKey]; exists {
+		return
+	}
+	id := sm.nextID()
+	now := time.Now()
+	s := &Session{
+		ID:        id,
+		Name:      name,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	s.SetAgentSessionID(agentSID)
+	sm.sessions[id] = s
+	sm.activeSession[userKey] = id
+	sm.userSessions[userKey] = append(sm.userSessions[userKey], id)
+	sm.saveLocked()
+	slog.Info("session migrated to workspace", "userKey", userKey, "agentSessionID", agentSID)
+}
+
 // Save persists current state to disk. Safe to call from outside (e.g. after message processing).
 func (sm *SessionManager) Save() {
 	sm.mu.RLock()
