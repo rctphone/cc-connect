@@ -1,8 +1,15 @@
 package core
 
 import (
+	"bytes"
 	"regexp"
 	"strings"
+
+	"github.com/yuin/goldmark"
+	highlighting "github.com/yuin/goldmark-highlighting/v2"
+	mathjax "github.com/litao91/goldmark-mathjax"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/renderer/html"
 )
 
 // maxPreTableWidth is the maximum display width (in monospace characters) for
@@ -568,9 +575,34 @@ func renderTableInline(b *strings.Builder, rows [][]string) {
 	}
 }
 
-// WrapHTMLDocument wraps an HTML body fragment in a full HTML document with
-// mobile-friendly viewport and minimal CSS for readability.
-func WrapHTMLDocument(title, body string) string {
+// fullMD is a goldmark instance configured for rich HTML document output.
+var fullMD = goldmark.New(
+	goldmark.WithExtensions(
+		extension.GFM, // tables, strikethrough, autolinks, task lists
+		mathjax.MathJax,
+		highlighting.NewHighlighting(
+			highlighting.WithStyle("github"),
+			highlighting.WithFormatOptions(),
+		),
+	),
+	goldmark.WithRendererOptions(
+		html.WithUnsafe(), // allow raw HTML in markdown
+	),
+)
+
+// MarkdownToFullHTML converts Markdown to a complete, standalone HTML document
+// using goldmark with GFM extensions, syntax highlighting, and MathJax support.
+// The output is suitable for viewing in a browser or Telegram's built-in viewer.
+func MarkdownToFullHTML(title, markdown string) string {
+	var buf bytes.Buffer
+	if err := fullMD.Convert([]byte(markdown), &buf); err != nil {
+		// Fallback: wrap raw text in <pre>
+		buf.Reset()
+		buf.WriteString("<pre>")
+		buf.WriteString(escapeHTML(markdown))
+		buf.WriteString("</pre>")
+	}
+
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -578,17 +610,35 @@ func WrapHTMLDocument(title, body string) string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>` + escapeHTML(title) + `</title>
 <style>
-body { font-family: -apple-system, system-ui, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 16px; color: #1a1a1a; }
-pre { background: #f4f4f4; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 14px; }
-code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 14px; }
+body { font-family: -apple-system, system-ui, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 16px; color: #1a1a1a; word-wrap: break-word; }
+h1, h2, h3, h4, h5, h6 { margin-top: 1.2em; margin-bottom: 0.4em; }
+h1 { font-size: 1.6em; border-bottom: 1px solid #eee; padding-bottom: 0.3em; }
+h2 { font-size: 1.4em; border-bottom: 1px solid #eee; padding-bottom: 0.2em; }
+pre { background: #f6f8fa; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.45; }
+code { background: #f6f8fa; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
 pre code { background: none; padding: 0; }
-blockquote { border-left: 3px solid #ddd; margin: 0; padding-left: 12px; color: #555; }
-a { color: #0366d6; }
-b { font-weight: 600; }
+blockquote { border-left: 3px solid #ddd; margin: 0.5em 0; padding: 0.2em 1em; color: #555; }
+a { color: #0366d6; text-decoration: none; }
+a:hover { text-decoration: underline; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+th, td { border: 1px solid #ddd; padding: 6px 12px; text-align: left; }
+th { background: #f6f8fa; font-weight: 600; }
+tr:nth-child(even) { background: #fafafa; }
+img { max-width: 100%; height: auto; }
+hr { border: none; border-top: 1px solid #eee; margin: 1.5em 0; }
+ul, ol { padding-left: 1.5em; }
+li { margin: 0.3em 0; }
+del { color: #888; }
+input[type="checkbox"] { margin-right: 0.4em; }
+.chroma { background: #f6f8fa; }
 </style>
+<script>
+window.MathJax = { tex: { inlineMath: [["$","$"],["\\(","\\)"]], displayMath: [["$$","$$"],["\\[","\\]"]] } };
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </head>
 <body>
-` + body + `
+` + buf.String() + `
 </body>
 </html>`
 }

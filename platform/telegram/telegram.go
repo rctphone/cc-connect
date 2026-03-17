@@ -674,9 +674,9 @@ func (p *Platform) handleCallbackQueryWithForum(cb *tgbotapi.CallbackQuery, thre
 		fileName := filepath.Base(filePath)
 		// Convert .md → .html
 		if strings.HasSuffix(strings.ToLower(fileName), ".md") {
-			htmlContent := core.MarkdownToSimpleHTML(string(fileData))
-			fileData = []byte(core.WrapHTMLDocument(strings.TrimSuffix(fileName, filepath.Ext(fileName)), htmlContent))
-			fileName = strings.TrimSuffix(fileName, filepath.Ext(fileName)) + ".html"
+			title := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+			fileData = []byte(core.MarkdownToFullHTML(title, string(fileData)))
+			fileName = title + ".html"
 		}
 		params := make(tgbotapi.Params)
 		params.AddNonZero64("chat_id", chatID)

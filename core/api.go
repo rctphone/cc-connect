@@ -209,9 +209,9 @@ func (s *APIServer) handleSendFile(w http.ResponseWriter, r *http.Request) {
 
 	// Convert .md → .html for better mobile viewing
 	if strings.HasSuffix(strings.ToLower(fileName), ".md") {
-		htmlContent := MarkdownToSimpleHTML(string(data))
-		data = []byte(WrapHTMLDocument(strings.TrimSuffix(fileName, filepath.Ext(fileName)), htmlContent))
-		fileName = strings.TrimSuffix(fileName, filepath.Ext(fileName)) + ".html"
+		title := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+		data = []byte(MarkdownToFullHTML(title, string(data)))
+		fileName = title + ".html"
 	}
 
 	if err := engine.SendFileToSession(req.SessionKey, fileName, data, req.Caption); err != nil {
