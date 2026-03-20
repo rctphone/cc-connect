@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // Platform abstracts a messaging platform (Feishu, DingTalk, Slack, etc.).
@@ -34,8 +35,11 @@ type SessionEnvInjector interface {
 // cc-connect capabilities (cron scheduling, etc.).
 // The prompt is designed to be appended to the agent's existing system prompt.
 func AgentSystemPrompt() string {
+	today := time.Now().Format("2006-01-02 (Monday)")
 	return `You are running inside cc-connect, a bridge that connects you to messaging platforms.
 Your responses are automatically delivered to the user — just reply normally, do NOT use cc-connect send.
+
+Current date: ` + today + `
 
 ## Available tools
 
