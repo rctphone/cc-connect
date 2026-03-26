@@ -708,20 +708,27 @@ func (e *Engine) ProjectName() string {
 // and processes the message as if the user sent it.
 func (e *Engine) ExecuteCronJob(job *CronJob) error {
 	sessionKey := job.SessionKey
-	platformName := ""
-	if idx := strings.Index(sessionKey, ":"); idx > 0 {
-		platformName = sessionKey[:idx]
-	}
 
-	var targetPlatform Platform
-	for _, p := range e.platforms {
-		if p.Name() == platformName {
-			targetPlatform = p
-			break
-		}
-	}
+	// Extract platform name and find the matching platform.
+	// The session key is normally "platform:...", but may have been stored
+	// with a workspace path prefix ("workspace_dir:platform:...") due to a
+	// prior bug. Try the simple split first, then fall back to searching for
+	// a registered platform name inside the key.
+	platformName, targetPlatform := e.resolvePlatformFromKey(sessionKey)
 	if targetPlatform == nil {
 		return fmt.Errorf("platform %q not found for session %q", platformName, sessionKey)
+	}
+
+	// If the session key had a workspace prefix, strip it so that downstream
+	// code (ReconstructReplyCtx, session manager) sees the raw platform key.
+	if platformName != "" {
+		rawPrefix := platformName + ":"
+		if !strings.HasPrefix(sessionKey, rawPrefix) {
+			// The platform was found inside the key — strip the workspace prefix.
+			if idx := strings.Index(sessionKey, ":"+rawPrefix); idx >= 0 {
+				sessionKey = sessionKey[idx+1:]
+			}
+		}
 	}
 
 	rc, ok := targetPlatform.(ReplyContextReconstructor)
@@ -771,6 +778,30 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 
 	e.processInteractiveMessage(targetPlatform, msg, session)
 	return nil
+}
+
+// resolvePlatformFromKey extracts the platform name from a session key and
+// returns the matching Platform. It handles both normal keys ("telegram:123")
+// and workspace-prefixed keys ("/path/to/workspace:telegram:123").
+func (e *Engine) resolvePlatformFromKey(sessionKey string) (string, Platform) {
+	// Try simple prefix extraction first (covers normal case).
+	if idx := strings.Index(sessionKey, ":"); idx > 0 {
+		name := sessionKey[:idx]
+		for _, p := range e.platforms {
+			if p.Name() == name {
+				return name, p
+			}
+		}
+	}
+	// Fallback: the key may have a workspace path prefix.
+	// Search for ":platform_name:" inside the key.
+	for _, p := range e.platforms {
+		needle := ":" + p.Name() + ":"
+		if strings.Contains(sessionKey, needle) {
+			return p.Name(), p
+		}
+	}
+	return "", nil
 }
 
 // executeCronShell runs a shell command for a cron job and sends the output.
@@ -1438,7 +1469,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	if agent != e.agent {
 		agentOverride = agent
 	}
-	state := e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, agentOverride, sessions)
+	state := e.getOrCreateInteractiveStateWith(interactiveKey, msg.SessionKey, p, msg.ReplyCtx, session, agentOverride, sessions)
 
 	// Set workspaceDir and sessions on the state
 	if workspaceDir != "" {
@@ -1493,7 +1524,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 			e.cleanupInteractiveState(interactiveKey, state)
 			e.send(p, msg.ReplyCtx, e.i18n.T(MsgSessionRestarting))
 
-			state = e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, agentOverride, sessions)
+			state = e.getOrCreateInteractiveStateWith(interactiveKey, msg.SessionKey, p, msg.ReplyCtx, session, agentOverride, sessions)
 			if workspaceDir != "" {
 				state.mu.Lock()
 				state.workspaceDir = workspaceDir
@@ -1581,12 +1612,12 @@ func (e *Engine) getOrCreateWorkspaceAgent(workspace string) (Agent, *SessionMan
 }
 
 func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, replyCtx any, session *Session) *interactiveState {
-	return e.getOrCreateInteractiveStateWith(sessionKey, p, replyCtx, session, nil, e.sessions)
+	return e.getOrCreateInteractiveStateWith(sessionKey, sessionKey, p, replyCtx, session, nil, e.sessions)
 }
 
 // getOrCreateInteractiveStateWith is like getOrCreateInteractiveState but accepts
 // an optional agent override and explicit session manager for multi-workspace mode.
-func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, replyCtx any, session *Session, agentOverride Agent, sessions *SessionManager) *interactiveState {
+func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, envSessionKey string, p Platform, replyCtx any, session *Session, agentOverride Agent, sessions *SessionManager) *interactiveState {
 	e.interactiveMu.Lock()
 	defer e.interactiveMu.Unlock()
 
@@ -1628,10 +1659,12 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 	}
 
 	// Inject per-session env vars so the agent subprocess can call `cc-connect cron add` etc.
+	// Use envSessionKey (the raw platform session key, e.g. "telegram:123:456")
+	// rather than sessionKey (which may include a workspace path prefix).
 	if inj, ok := agent.(SessionEnvInjector); ok {
 		envVars := []string{
 			"CC_PROJECT=" + e.name,
-			"CC_SESSION_KEY=" + sessionKey,
+			"CC_SESSION_KEY=" + envSessionKey,
 		}
 		if exePath, err := os.Executable(); err == nil {
 			binDir := filepath.Dir(exePath)
