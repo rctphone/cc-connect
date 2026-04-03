@@ -114,7 +114,11 @@ func (b *sendBatcher) flush(key sendBufferKey) {
 	delete(b.buffers, key)
 	b.mu.Unlock()
 
-	if err := b.send(key.chatID, strings.Join(entry.parts, "\n\n"), entry.replyTo, key.threadID); err != nil {
+	text := strings.TrimSpace(strings.Join(entry.parts, "\n\n"))
+	if text == "" {
+		return
+	}
+	if err := b.send(key.chatID, text, entry.replyTo, key.threadID); err != nil {
 		slog.Error("telegram: batcher flush failed", "chat", key.chatID, "error", err)
 	}
 }
@@ -136,6 +140,64 @@ func (b *sendBatcher) flushAll() {
 	}
 }
 
+// bufferMediaGroup collects photos/documents from a Telegram album. Telegram
+// sends each item in a media group as a separate Update, all sharing the same
+// MediaGroupID. We buffer them for 500ms after the last item arrives, then
+// dispatch a single core.Message with all attachments.
+func (p *Platform) bufferMediaGroup(groupID string, img *core.ImageAttachment, file *core.FileAttachment, caption string, tmpl *core.Message) {
+	p.mgMu.Lock()
+	defer p.mgMu.Unlock()
+
+	entry, ok := p.mediaGroups[groupID]
+	if !ok {
+		entry = &mediaGroupEntry{coreMsg: tmpl}
+		p.mediaGroups[groupID] = entry
+	}
+	if img != nil {
+		entry.images = append(entry.images, *img)
+	}
+	if file != nil {
+		entry.files = append(entry.files, *file)
+	}
+	if caption != "" && entry.caption == "" {
+		entry.caption = caption
+	}
+
+	// Reset timer: wait 500ms after the last item before dispatching
+	if entry.timer != nil {
+		entry.timer.Stop()
+	}
+	entry.timer = time.AfterFunc(500*time.Millisecond, func() { p.flushMediaGroup(groupID) })
+}
+
+func (p *Platform) flushMediaGroup(groupID string) {
+	p.mgMu.Lock()
+	entry, ok := p.mediaGroups[groupID]
+	if !ok {
+		p.mgMu.Unlock()
+		return
+	}
+	delete(p.mediaGroups, groupID)
+	p.mgMu.Unlock()
+
+	msg := entry.coreMsg
+	msg.Content = entry.caption
+	msg.Images = entry.images
+	msg.Files = entry.files
+	slog.Debug("telegram: media group flushed", "group_id", groupID, "images", len(entry.images), "files", len(entry.files))
+	p.handler(p, msg)
+}
+
+// mediaGroupEntry buffers photos/documents that arrive as a Telegram media group (album).
+// Telegram delivers each item as a separate Update; we collect them and dispatch once.
+type mediaGroupEntry struct {
+	images  []core.ImageAttachment
+	files   []core.FileAttachment
+	caption string // caption from the first message in the group
+	coreMsg *core.Message // template message (from first item)
+	timer   *time.Timer
+}
+
 type Platform struct {
 	token                 string
 	allowFrom             string
@@ -147,6 +209,9 @@ type Platform struct {
 	handler               core.MessageHandler
 	cancel                context.CancelFunc
 	batcher               *sendBatcher
+
+	mgMu          sync.Mutex
+	mediaGroups   map[string]*mediaGroupEntry // MediaGroupID → buffered entry
 }
 
 func New(opts map[string]any) (core.Platform, error) {
@@ -218,6 +283,7 @@ func New(opts map[string]any) (core.Platform, error) {
 		groupReplyAll: groupReplyAll, groupReplyAllChats: replyAllChats,
 		shareSessionInChannel: shareSessionInChannel,
 		httpClient: httpClient,
+		mediaGroups: make(map[string]*mediaGroupEntry),
 	}
 
 	if batchDelayMs > 0 {
@@ -428,12 +494,25 @@ func (p *Platform) handleMessageUpdate(msg *tgbotapi.Message, ff forumFields) {
 			caption = strings.ReplaceAll(caption, "@"+p.bot.Self.UserName, "")
 			caption = strings.TrimSpace(caption)
 		}
+		img := core.ImageAttachment{MimeType: "image/jpeg", Data: imgData}
+
+		// Media group (album): buffer photos and dispatch once all arrive
+		if msg.MediaGroupID != "" {
+			p.bufferMediaGroup(msg.MediaGroupID, &img, nil, caption, &core.Message{
+				SessionKey: sessionKey, Platform: "telegram",
+				UserID: userID, UserName: userName,
+				MessageID: strconv.Itoa(msg.MessageID),
+				ReplyCtx:  rctx,
+			})
+			return
+		}
+
 		coreMsg := &core.Message{
 			SessionKey: sessionKey, Platform: "telegram",
 			UserID: userID, UserName: userName,
 			Content:   caption,
 			MessageID: strconv.Itoa(msg.MessageID),
-			Images:    []core.ImageAttachment{{MimeType: "image/jpeg", Data: imgData}},
+			Images:    []core.ImageAttachment{img},
 			ReplyCtx:  rctx,
 		}
 		p.handler(p, coreMsg)
@@ -508,12 +587,25 @@ func (p *Platform) handleMessageUpdate(msg *tgbotapi.Message, ff forumFields) {
 			caption = strings.ReplaceAll(caption, "@"+p.bot.Self.UserName, "")
 			caption = strings.TrimSpace(caption)
 		}
+		file := core.FileAttachment{MimeType: msg.Document.MimeType, Data: fileData, FileName: msg.Document.FileName}
+
+		// Media group: buffer documents that arrive as an album
+		if msg.MediaGroupID != "" {
+			p.bufferMediaGroup(msg.MediaGroupID, nil, &file, caption, &core.Message{
+				SessionKey: sessionKey, Platform: "telegram",
+				UserID: userID, UserName: userName,
+				MessageID: strconv.Itoa(msg.MessageID),
+				ReplyCtx:  rctx,
+			})
+			return
+		}
+
 		coreMsg := &core.Message{
 			SessionKey: sessionKey, Platform: "telegram",
 			UserID: userID, UserName: userName,
 			Content:   caption,
 			MessageID: strconv.Itoa(msg.MessageID),
-			Files:     []core.FileAttachment{{MimeType: msg.Document.MimeType, Data: fileData, FileName: msg.Document.FileName}},
+			Files:     []core.FileAttachment{file},
 			ReplyCtx:  rctx,
 		}
 		p.handler(p, coreMsg)

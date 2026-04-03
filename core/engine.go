@@ -205,6 +205,7 @@ type messageQueue struct {
 	confirmPending bool   // waiting for user to confirm next queue item
 	agent          Agent           // agent to use when processing queued items
 	sessions       *SessionManager // session manager for queued items
+	messages       map[string]*Message // full messages keyed by ref ID (preserves images/files)
 }
 
 const defaultQueueMaxSize = 10
@@ -267,6 +268,20 @@ func parseQueuePin(content string) []string {
 // isQueuePin checks whether a message starts with the queue pin marker.
 func isQueuePin(content string) bool {
 	return strings.HasPrefix(content, QueuePinPrefix)
+}
+
+// parseQueueRef parses a queue item that starts with "ref:KEY|preview".
+// Returns the ref key, the preview text, and true if the format matched.
+func parseQueueRef(item string) (refKey, preview string, ok bool) {
+	if !strings.HasPrefix(item, "ref:") {
+		return "", "", false
+	}
+	rest := item[4:] // strip "ref:"
+	idx := strings.Index(rest, "|")
+	if idx < 0 {
+		return rest, "", true
+	}
+	return rest[:idx], rest[idx+1:], true
 }
 
 // interactiveState tracks a running interactive agent session and its permission state.
@@ -771,12 +786,31 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 		ReplyCtx:   replyCtx,
 	}
 
-	session := e.sessions.GetOrCreateActive(sessionKey)
+	// Resolve workspace so cron jobs use the same per-workspace agent
+	// and session manager as interactive messages.
+	sessions := e.sessions
+	agent := e.agent
+	interactiveKey := sessionKey
+	var resolvedWorkspace string
+
+	if cfgDir := e.resolveConfigWorkspace(sessionKey); cfgDir != "" {
+		resolvedWorkspace = cfgDir
+		wsAgent, wsSessions, err := e.getOrCreateWorkspaceAgent(cfgDir)
+		if err != nil {
+			return fmt.Errorf("create workspace agent for cron: %w", err)
+		}
+		sessions = wsSessions
+		agent = wsAgent
+		interactiveKey = resolvedWorkspace + ":" + sessionKey
+		sessions.MigrateFrom(e.sessions, sessionKey)
+	}
+
+	session := sessions.GetOrCreateActive(sessionKey)
 	if !session.TryLock() {
 		return fmt.Errorf("session %q is busy", sessionKey)
 	}
 
-	e.processInteractiveMessage(targetPlatform, msg, session)
+	e.processInteractiveMessageWith(targetPlatform, msg, session, agent, sessions, interactiveKey, resolvedWorkspace)
 	return nil
 }
 
@@ -1916,10 +1950,27 @@ func (e *Engine) enqueueMessage(p Platform, msg *Message, agent Agent, sessions 
 	if state.queue.sessions == nil {
 		state.queue.sessions = sessions
 	}
+	if state.queue.messages == nil {
+		state.queue.messages = make(map[string]*Message)
+	}
 	state.mu.Unlock()
 
-	// Append the new message (escape newlines)
-	items = append(items, msg.Content)
+	// Build a ref key and store the full message (preserves images/files)
+	refKey := msg.Platform + ":" + msg.MessageID
+	preview := msg.Content
+	if preview == "" && len(msg.Images) > 0 {
+		preview = fmt.Sprintf("[%d image(s)]", len(msg.Images))
+	}
+	if len(msg.Images) > 0 && preview != "" {
+		preview = fmt.Sprintf("[%d img] %s", len(msg.Images), preview)
+	}
+
+	state.mu.Lock()
+	state.queue.messages[refKey] = msg
+	state.mu.Unlock()
+
+	// Append ref:KEY|preview to pin items
+	items = append(items, "ref:"+refKey+"|"+preview)
 
 	// Check pin length limit
 	text := formatQueuePin(items)
@@ -1928,7 +1979,8 @@ func (e *Engine) enqueueMessage(p Platform, msg *Message, agent Agent, sessions 
 		return
 	}
 
-	slog.Info("message enqueued", "session", interactiveKey, "queue_len", len(items), "user", msg.UserName)
+	slog.Info("message enqueued", "session", interactiveKey, "queue_len", len(items), "user", msg.UserName,
+		"images", len(msg.Images), "files", len(msg.Files), "ref", refKey)
 	e.writeQueuePin(state, p, msg.ReplyCtx, items)
 }
 
@@ -1953,7 +2005,12 @@ func (e *Engine) processNextInQueue(interactiveKey string) {
 	replyCtx := state.replyCtx
 	state.mu.Unlock()
 
-	preview := truncateStr(items[0], 80)
+	// Show human-readable preview (strip ref: prefix if present)
+	previewText := items[0]
+	if _, pv, ok := parseQueueRef(previewText); ok && pv != "" {
+		previewText = pv
+	}
+	preview := truncateStr(previewText, 80)
 	confirmText := fmt.Sprintf(e.i18n.T(MsgQueueConfirm), preview)
 
 	buttons := [][]ButtonOption{
@@ -2036,6 +2093,16 @@ func (e *Engine) handleQueueResponse(p Platform, msg *Message, content string) b
 		agent := state.queue.agent
 		sessions := state.queue.sessions
 		workspaceDir := state.workspaceDir
+
+		// Try to resolve full message from in-memory store (preserves images/files)
+		var queuedMsg *Message
+		if refKey, _, ok := parseQueueRef(itemContent); ok && state.queue.messages != nil {
+			if stored, found := state.queue.messages[refKey]; found {
+				queuedMsg = stored
+				queuedMsg.ReplyCtx = msg.ReplyCtx // update reply context to current
+				delete(state.queue.messages, refKey)
+			}
+		}
 		state.mu.Unlock()
 
 		if agent == nil {
@@ -2048,15 +2115,22 @@ func (e *Engine) handleQueueResponse(p Platform, msg *Message, content string) b
 		// Update pin with remaining items
 		e.writeQueuePin(state, p, msg.ReplyCtx, remaining)
 
-		// Restore newlines that were escaped for pin storage
-		queuedContent := strings.ReplaceAll(itemContent, queueItemSep, "\n")
-		queuedMsg := &Message{
-			SessionKey: msg.SessionKey,
-			Content:    queuedContent,
-			ReplyCtx:   msg.ReplyCtx,
-			Platform:   msg.Platform,
-			UserID:     msg.UserID,
-			UserName:   msg.UserName,
+		// Fallback: if message not found in memory (e.g. after restart), use text from pin
+		if queuedMsg == nil {
+			queuedContent := itemContent
+			// Strip ref: prefix if present
+			if _, preview, ok := parseQueueRef(itemContent); ok {
+				queuedContent = preview
+			}
+			queuedContent = strings.ReplaceAll(queuedContent, queueItemSep, "\n")
+			queuedMsg = &Message{
+				SessionKey: msg.SessionKey,
+				Content:    queuedContent,
+				ReplyCtx:   msg.ReplyCtx,
+				Platform:   msg.Platform,
+				UserID:     msg.UserID,
+				UserName:   msg.UserName,
+			}
 		}
 
 		session := sessions.GetOrCreateActive(msg.SessionKey)
@@ -2085,7 +2159,21 @@ func (e *Engine) handleQueueResponse(p Platform, msg *Message, content string) b
 		skippedContent := items[0]
 		remaining := items[1:]
 
-		preview := truncateStr(skippedContent, 60)
+		// Clean up stored message if it was a ref
+		if refKey, _, ok := parseQueueRef(skippedContent); ok {
+			state.mu.Lock()
+			if state.queue.messages != nil {
+				delete(state.queue.messages, refKey)
+			}
+			state.mu.Unlock()
+		}
+
+		// Show human-readable preview
+		skippedPreview := skippedContent
+		if _, pv, ok := parseQueueRef(skippedContent); ok && pv != "" {
+			skippedPreview = pv
+		}
+		preview := truncateStr(skippedPreview, 60)
 		e.send(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgQueueSkipped), preview))
 
 		// Update pin and prompt for next
@@ -2096,6 +2184,7 @@ func (e *Engine) handleQueueResponse(p Platform, msg *Message, content string) b
 		pinnedHandle := state.queue.pinnedHandle
 		state.queue.pinnedHandle = nil
 		state.queue.cachedContent = ""
+		state.queue.messages = nil // release stored messages
 		state.mu.Unlock()
 
 		// Discover pin if handle was lost (e.g. after restart)
@@ -2152,7 +2241,11 @@ func (e *Engine) handleQueueResponseStateless(p Platform, msg *Message, action s
 
 	case "skip":
 		remaining := items[1:]
-		preview := truncateStr(items[0], 60)
+		skippedPreview := items[0]
+		if _, pv, ok := parseQueueRef(skippedPreview); ok && pv != "" {
+			skippedPreview = pv
+		}
+		preview := truncateStr(skippedPreview, 60)
 		e.send(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgQueueSkipped), preview))
 
 		// Create or reuse state for queue continuation (workspace-aware)
@@ -2166,7 +2259,13 @@ func (e *Engine) handleQueueResponseStateless(p Platform, msg *Message, action s
 			return true
 		}
 		remaining := items[1:]
-		itemContent := strings.ReplaceAll(items[0], queueItemSep, "\n")
+
+		// Parse ref format; fall back to raw content
+		itemContent := items[0]
+		if _, preview, ok := parseQueueRef(itemContent); ok {
+			itemContent = preview
+		}
+		itemContent = strings.ReplaceAll(itemContent, queueItemSep, "\n")
 
 		// Resolve workspace-aware agent, sessions, and interactive key
 		agent, sessions := e.sessionContextForKey(msg.SessionKey)
