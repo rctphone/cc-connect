@@ -1722,10 +1722,12 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, envSessionKe
 	agentSID := session.GetAgentSessionID()
 	// If no saved session ID, try to pick up the most recent agent session
 	// from disk. This recovers from daemon restarts that killed the process
-	// before the session ID was persisted.
+	// before the session ID was persisted. The agent's ListSessions is
+	// already scoped to its work_dir, so in multi-workspace mode the
+	// workspace-specific agent only returns sessions for that workspace.
 	if agentSID == "" {
-		if sessions, err := agent.ListSessions(e.ctx); err == nil && len(sessions) > 0 {
-			agentSID = sessions[0].ID // sorted by ModifiedAt desc
+		if agentSessions, err := agent.ListSessions(e.ctx); err == nil && len(agentSessions) > 0 {
+			agentSID = agentSessions[0].ID // sorted by ModifiedAt desc
 			session.CompareAndSetAgentSessionID(agentSID)
 			slog.Info("recovered agent session from disk", "session_key", sessionKey, "agent_session", agentSID)
 		}
